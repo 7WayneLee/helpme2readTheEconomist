@@ -6,8 +6,10 @@ from html import escape
 from importlib.resources import files
 
 from ..models import Digest
+from ..taxonomy import TIERS
 from .common import (Entry, english_article, generation_time, merged_leader_titles,
-                     metadata, overview, sections, skipped, statistics, summary_fields, title)
+                     metadata, overview, sections, skipped, statistics, summary_fields, title,
+                     word_count_label)
 
 
 def paragraph(value: str) -> str:
@@ -22,7 +24,9 @@ def article_html(digest: Digest, entry: Entry) -> str:
     level, tier = entry.classification.taiwan_level, entry.summary.tier
     header = f'<h4>{escape(entry.classification.title_zh)}</h4><p lang="en"><i>{escape(entry.article.title)}</i></p>'
     header += paragraph(metadata(entry))
-    header += f'<span class="badge taiwan t{level}">T{level}</span> <span class="badge tier">{escape(tier)}</span>'
+    if level:
+        header += f'<span class="badge taiwan t{level}">T{level}</span> '
+    header += f'<span class="badge tier">{escape(TIERS[tier])}</span>'
     headline, *fields = summary_fields(entry.summary)
     body = ""
     if level:
@@ -43,7 +47,7 @@ def english_html(digest: Digest) -> str:
     classification = digest.classifications.get(article.id)
     result = f'<h3 lang="en">{escape(article.title)}</h3>' + paragraph(classification.title_zh if classification else article.title)
     result += "<h3>選文理由</h3>" + paragraph(pick.reason_zh)
-    result += paragraph(f"CEFR：{pick.cefr} · 字數：{pick.word_count:,} · 預估閱讀時間：{pick.reading_minutes} 分鐘")
+    result += paragraph(f"CEFR：{pick.cefr} · 字數：{word_count_label(pick.word_count)} · 預估閱讀時間：{pick.reading_minutes} 分鐘")
     result += "<h3>背景導讀</h3>" + paragraph(pick.pre_reading_zh)
     result += '<h3>生詞表</h3><div class="table-scroll"><table><thead><tr>' + "".join(f"<th>{v}</th>" for v in ("word", "詞性", "中文", "原文例句", "補充")) + "</tr></thead><tbody>"
     for item in pick.vocabulary:

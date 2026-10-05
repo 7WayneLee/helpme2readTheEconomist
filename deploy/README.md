@@ -9,6 +9,13 @@ python3 -m venv .venv
 
 `gwg` 須可從 `~/.local/bin` 執行；密鑰放在 `~/.config/econ-digest/env`，權限設為 `600`。用 `econ-digest telegram-setup --test` 設定私人聊天室，並先執行 `econ-digest run --no-send` 檢閱報告。
 
+可先只產生單元檔並驗證；這個模式不會呼叫 `systemctl` 或安裝定時器：
+
+```sh
+deploy/install-user-timer.sh --print-units data/systemd-preview
+systemd-analyze --user verify data/systemd-preview/econ-digest.service data/systemd-preview/econ-digest.timer
+```
+
 使用者核准後，在要長期保留的儲存庫路徑執行：
 
 ```sh

@@ -6,7 +6,8 @@ from html import escape
 
 from ..models import Digest
 from .common import (Entry, english_article, generation_time, merged_leader_titles,
-                     metadata, overview, sections, skipped, statistics, summary_fields, title)
+                     metadata, overview, sections, skipped, statistics, summary_fields, title,
+                     word_count_label)
 
 
 def text(value: str) -> str:
@@ -18,8 +19,9 @@ def table_cell(value: str) -> str:
 
 
 def article_lines(digest: Digest, entry: Entry) -> list[str]:
+    level = f" · T{entry.classification.taiwan_level}" if entry.classification.taiwan_level else ""
     result = [f"### {text(entry.classification.title_zh)}", "", f"*{text(entry.article.title)}*", "",
-              f"{text(metadata(entry))} · T{entry.classification.taiwan_level} · {entry.summary.tier}", ""]
+              f"{text(metadata(entry))}{level}", ""]
     if entry.classification.taiwan_level:
         result.extend(["**與台灣的關聯**", "", text(entry.classification.taiwan_link or "未提供"), ""])
     for label, values in summary_fields(entry.summary):
@@ -40,7 +42,7 @@ def english_lines(digest: Digest) -> list[str]:
     classification = digest.classifications.get(article.id)
     lines = [f"### {text(article.title)}", "", text(classification.title_zh if classification else article.title), "",
              f"**選文理由**：{text(pick.reason_zh)}", "",
-             f"CEFR：{text(pick.cefr)} · 字數：{pick.word_count:,} · 預估閱讀時間：{pick.reading_minutes} 分鐘", "",
+             f"CEFR：{text(pick.cefr)} · 字數：{word_count_label(pick.word_count)} · 預估閱讀時間：{pick.reading_minutes} 分鐘", "",
              "### 背景導讀", "", text(pick.pre_reading_zh), "", "### 生詞表", "",
              "| word | 詞性 | 中文 | 原文例句 | 補充 |", "| --- | --- | --- | --- | --- |"]
     lines.extend("| " + " | ".join(table_cell(v) for v in (item.word, item.pos, item.meaning_zh, item.example_en, item.note_zh or "")) + " |"

@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from collections.abc import Callable
 from html.parser import HTMLParser
 import json
 from pathlib import Path
+import re
 
 import pytest
 
 from econ_digest.models import BriefItem, Digest
 from econ_digest.render import render_html, render_markdown, render_telegram, write_outputs
-from econ_digest.taxonomy import CATEGORY_SHORT_LABELS
+from econ_digest.render.telegram import overview_html
+from econ_digest.taxonomy import CATEGORY_SHORT_LABELS, TIERS
 from econ_digest.telegram.format import check_html, utf16_len
 
 
@@ -126,3 +129,65 @@ def test_write_outputs(sample_digest: Digest, tmp_path: Path) -> None:
     assert paths["markdown"].read_text(encoding="utf-8") == render_markdown(sample_digest)
     assert paths["html"].read_text(encoding="utf-8") == render_html(sample_digest)
     assert json.loads(paths["telegram"].read_text(encoding="utf-8")) == render_telegram(sample_digest)
+
+
+def test_telegram_brief_shows_each_item_once(sample_digest: Digest) -> None:
+    assert sample_digest.week_brief is not None
+    sample_digest.week_brief.politics = [BriefItem(f"政治要聞 {i:02}") for i in range(11)]
+    sample_digest.week_brief.politics.insert(2, BriefItem("台灣政治要聞唯一標記", True))
+    sample_digest.week_brief.business = [BriefItem(f"商業要聞 {i:02}") for i in range(7)]
+    sample_digest.week_brief.business.insert(6, BriefItem("台灣商業要聞唯一標記", True))
+    rendered = overview_html(sample_digest)
+    visible, hidden = rendered.split("<blockquote expandable>", 1)
+    hidden = hidden.split("</blockquote>", 1)[0]
+    assert "其餘政治要聞（3 則）" in hidden and "其餘商業要聞（2 則）" in hidden
+    for label, count, shown in (("政治", 11, 8), ("商業", 7, 5)):
+        for index in range(count):
+            marker = f"{label}要聞 {index:02}"
+            assert rendered.count(marker) == 1
+            assert (marker in visible) == (index < shown)
+            assert (marker in hidden) == (index >= shown)
+    for marker in ("台灣政治要聞唯一標記", "台灣商業要聞唯一標記"):
+        assert rendered.count(marker) == 1 and marker in visible and marker not in hidden
+    assert visible.index("台灣政治要聞唯一標記") < visible.index("政治要聞 00")
+    check_html(rendered)
+
+
+@pytest.mark.parametrize("extra_politics,extra_business", [(0, 0), (1, 0), (0, 1)])
+def test_telegram_brief_omits_empty_remainder(sample_digest: Digest, extra_politics: int, extra_business: int) -> None:
+    assert sample_digest.week_brief is not None
+    sample_digest.week_brief.politics = [BriefItem(f"政治 {i}") for i in range(8 + extra_politics)]
+    sample_digest.week_brief.business = [BriefItem(f"商業 {i}") for i in range(5 + extra_business)]
+    rendered = overview_html(sample_digest)
+    assert ("<blockquote expandable>" in rendered) == bool(extra_politics or extra_business)
+    assert ("其餘政治要聞（1 則）" in rendered) == bool(extra_politics)
+    assert ("其餘商業要聞（1 則）" in rendered) == bool(extra_business)
+    assert "（0 則）" not in rendered
+
+
+def test_tier_letters_are_internal_and_taiwan_levels_stay(sample_digest: Digest) -> None:
+    markdown = render_markdown(sample_digest)
+    html = render_html(sample_digest)
+    telegram = "\n".join(render_telegram(sample_digest))
+    assert "### 美國政策\n" in markdown and "<h4>美國政策</h4>" in html and "<b>美國政策</b>" in telegram
+    for tier in "ABCDE":
+        assert f"（{tier}）" not in markdown + html + telegram
+        assert f'<span class="badge tier">{tier}</span>' not in html
+        assert f'<span class="badge tier">{TIERS[tier]}</span>' in html
+    assert re.search(r" · [A-E](?:\n|$)", markdown) is None
+    for report in (markdown, html, telegram):
+        assert all(level in report for level in ("T1", "T2", "T3"))
+        assert "T0" not in report
+
+
+@pytest.mark.parametrize("renderer", [render_markdown, render_html, render_telegram])
+def test_word_counts_explicitly_describe_english(sample_digest: Digest,
+                                               renderer: Callable[[Digest], str | list[str]]) -> None:
+    sample_digest.issue.articles[0].word_count = 958
+    assert sample_digest.english is not None
+    sample_digest.english.word_count = 958
+    rendered = renderer(sample_digest)
+    report = "\n".join(rendered) if isinstance(rendered, list) else rendered
+    assert report.count("英文 958 字") == 2
+    assert "字數：英文 958 字" in report
+    assert re.search(r"(?<!英文 )958 字", report) is None

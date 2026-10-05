@@ -72,13 +72,17 @@ def overview(digest: Digest) -> str:
             f"T3 {counts[2]} 篇｜英文選文：{pick.title if pick else '本期未選文'}")
 
 
+def word_count_label(count: int) -> str:
+    return f"英文 {count:,} 字"
+
+
 def metadata(entry: Entry) -> str:
     article = entry.article
     tags = {"leader": "社論", "column": "專欄", "briefing": "特別報導"}
     parts = [article.section]
     if article.fly_title:
         parts.append(article.fly_title)
-    parts.append(f"{article.word_count:,} 字")
+    parts.append(word_count_label(article.word_count))
     if article.kind in tags:
         parts.append(tags[article.kind])
     if article.is_cover:

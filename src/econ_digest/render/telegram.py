@@ -5,7 +5,7 @@ from __future__ import annotations
 from ..models import BriefItem, Digest
 from ..telegram.format import blockquote, bold, escape, italic, pack_blocks, split_html
 from .common import (Entry, english_article, merged_leader_titles, metadata, overview,
-                     sections, summary_fields, title)
+                     sections, summary_fields, title, word_count_label)
 
 
 def field(label: str, values: list[str]) -> str:
@@ -23,10 +23,13 @@ def overview_html(digest: Digest) -> str:
         taiwan = [item for item in [*brief.politics, *brief.business] if item.taiwan_related]
         if taiwan:
             lines.append(brief_list(taiwan))
-        lines.extend([bold("政治"), brief_list([item for item in brief.politics if not item.taiwan_related][:8]),
-                      bold("商業"), brief_list([item for item in brief.business if not item.taiwan_related][:5])])
-        lines.append(blockquote(bold("完整政治要聞") + "\n" + brief_list(brief.politics) + "\n\n"
-                                + bold("完整商業要聞") + "\n" + brief_list(brief.business), expandable=True))
+        politics = [item for item in brief.politics if not item.taiwan_related]
+        business = [item for item in brief.business if not item.taiwan_related]
+        lines.extend([bold("政治"), brief_list(politics[:8]), bold("商業"), brief_list(business[:5])])
+        remaining = [bold(f"其餘{label}要聞（{len(items)} 則）") + "\n" + brief_list(items)
+                     for label, items in (("政治", politics[8:]), ("商業", business[5:])) if items]
+        if remaining:
+            lines.append(blockquote("\n\n".join(remaining), expandable=True))
     pick = english_article(digest)
     lines.extend(["", bold("英文學習選文"), italic(pick.title) if pick else "本期未選文。"])
     return "\n".join(lines)
@@ -47,7 +50,7 @@ def full_taiwan_html(digest: Digest, entry: Entry) -> str:
 
 def compact_html(digest: Digest, entry: Entry, *, taiwan: bool = False) -> str:
     summary = entry.summary
-    label = f"{'🇹🇼 T3 · ' if taiwan else ''}{entry.classification.title_zh}（{summary.tier}）"
+    label = f"{'🇹🇼 T3 · ' if taiwan else ''}{entry.classification.title_zh}"
     if summary.tier == "E" and not taiwan:
         return bold(label) + " — " + escape(summary.headline_zh)
     lines = [bold(label), italic(entry.article.title), escape(metadata(entry)), escape(summary.headline_zh)]
@@ -78,7 +81,7 @@ def english_blocks(digest: Digest) -> list[str]:
     result = [bold("英文學習選文") + "\n" + italic(article.title) + "\n"
               + bold(classification.title_zh if classification else article.title) + "\n\n"
               + field("選文理由", [pick.reason_zh]) + "\n"
-              + escape(f"CEFR：{pick.cefr} · 字數：{pick.word_count:,} · 預估閱讀時間：{pick.reading_minutes} 分鐘")
+              + escape(f"CEFR：{pick.cefr} · 字數：{word_count_label(pick.word_count)} · 預估閱讀時間：{pick.reading_minutes} 分鐘")
               + "\n\n" + field("背景導讀", [pick.pre_reading_zh])]
     vocabulary = "\n\n".join(bold(item.word) + " " + escape(item.pos) + "\n" + escape(item.meaning_zh)
                                   + "\n" + italic(item.example_en) + ("\n" + escape(item.note_zh) if item.note_zh else "") for item in pick.vocabulary)
