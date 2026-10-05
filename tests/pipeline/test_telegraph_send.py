@@ -589,13 +589,15 @@ def test_fact_alert_is_one_private_message_and_never_sent_to_channel(prepared_te
     config = replace(config, secrets=replace(config.secrets, telegram_channel_id='synthetic-channel'))
     digest = Digest.from_dict(json.loads((directory / 'digest.json').read_text()))
     digest.fact_alerts = [{'fact': f'合成舊值{i}', 'suspected_new_value': '合成新值',
-                           'evidence_url': 'https://www.cna.com.tw/news/aipl/202610010001.aspx'} for i in range(7)]
+                           'evidence_url': 'https://www.cna.com.tw/news/aipl/202610010001.aspx',
+                           'evidence_title': f'合成證據標題{i}'} for i in range(7)]
     save_json(directory / 'digest.json', digest)
     assert send.send_digest(config, log=lambda _: None) == 0
     alert_messages = [message for message in opener.messages if '台灣事實檔可能需要更新' in message['text']]
     assert len(alert_messages) == 1
     assert alert_messages[0]['chat_id'] == config.secrets.telegram_chat_id
     assert alert_messages[0]['text'].count('• ') == 5 and '（請確認）' in alert_messages[0]['text']
+    assert all(f'〈合成證據標題{i}〉' in alert_messages[0]['text'] for i in range(5))
     assert all('台灣事實檔' not in message['text'] for message in opener.messages
                if message['chat_id'] == 'synthetic-channel')
     assert send.send_digest(config, log=lambda _: None) == 0

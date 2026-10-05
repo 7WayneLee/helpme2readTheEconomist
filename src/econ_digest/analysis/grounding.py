@@ -109,6 +109,8 @@ def grounding_units(issue: Issue, ids: list[str], classifications: dict[str, Cla
                          if (link := article_taiwan_link(classifications[identifier]))}
         return make_unit("ground", issue.issue_date, batch, config.llm.models.ground,
                          lambda data: validate_grounding(data, selected, article_links), facts=load_taiwan_facts(),
+                         fixed_level_ids=prompt_json([identifier for identifier in batch
+                                                     if classifications[identifier].taiwan_level == 0]),
                          articles=prompt_json(payload))
 
     return split_units(ids, build, max_items=3, max_bytes=90_000)
@@ -130,16 +132,18 @@ def apply_grounding(data: dict[str, Any], issue: Issue, classifications: dict[st
         identifier = item["article_id"]
         classification = classifications[identifier]
         level = item["taiwan_level"]
-        # External evidence can establish exposure, but cannot turn an article
-        # about another subject into a Taiwan-led story. Keep the classification's
-        # article-based limit on direct involvement; grounding may narrow it.
-        if level in {1, 2} and classification.taiwan_level in {0, 3}:
-            level = 3
-        elif level == 1 and classification.taiwan_level == 2:
-            level = 2
+        # Grounding may narrow the article-based classification, never raise it.
+        # Level-zero focus articles receive implications only.
+        if classification.taiwan_level == 0:
+            level = 0
+        elif level:
+            level = max(level, classification.taiwan_level)
         classification.taiwan_level = level
-        link = item["taiwan_link"]
+        link = item["taiwan_link"] if level else None
         classification.taiwan_link = link["text_zh"] if link else None
+        if (link and not classification.mentions_taiwan
+                and not classification.taiwan_link.startswith("（推論）")):
+            classification.taiwan_link = "（推論）" + classification.taiwan_link
         classification.sources = _sources([link] if link else [], evidence[identifier])
         classification.tier = assign_tier(by_id[identifier].kind, classification.taiwan_level,
                                            classification.category, classification.companion_id is not None, config.tiers)
@@ -184,19 +188,20 @@ def ground_digest(issue: Issue, classifications: dict[str, Classification], summ
             warnings.append("台灣關聯查證失敗，保留原文實質提及的台灣關聯，刪除未查證推論與意涵。")
 
 
-def validate_fact_alerts(data: dict[str, Any], urls: set[str]) -> None:
+def validate_fact_alerts(data: dict[str, Any], headlines: dict[str, str]) -> None:
     if not isinstance(data.get("alerts"), list):
         raise ValueError("facts alerts must be an array")
     data["alerts"] = [item for item in data["alerts"] if isinstance(item, dict)
                       and all(isinstance(item.get(key), str) and item[key].strip()
-                              for key in ("fact", "suspected_new_value", "evidence_url"))
-                      and item["evidence_url"] in urls and cna_url(item["evidence_url"])]
+                              for key in ("fact", "suspected_new_value", "evidence_url", "evidence_title"))
+                      and headlines.get(item["evidence_url"]) == item["evidence_title"]
+                      and cna_url(item["evidence_url"])]
 
 
 def facts_unit(issue_date: str, evidence: list[Evidence], config: Config) -> Unit:
-    urls = {entry.source.url for entry in evidence}
+    headlines = {entry.source.url: entry.source.title for entry in evidence}
     unit = make_unit("facts", issue_date, [], config.llm.models.facts,
-                     lambda data: validate_fact_alerts(data, urls), facts=load_taiwan_facts(),
+                     lambda data: validate_fact_alerts(data, headlines), facts=load_taiwan_facts(),
                      evidence=prompt_json([entry.to_dict() for entry in evidence]))
     if unit.prompt_bytes > 90_000:
         raise ValueError("facts exceeds 90,000 prompt bytes")
@@ -212,7 +217,10 @@ def check_facts(issue_date: str, config: Config, runner: UnitRunner, cna: CNACli
     try:
         saved = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(saved, dict) and saved.get("identity") == identity and isinstance(saved.get("alerts"), list):
-            validate_fact_alerts(saved, set(saved.get("urls", [])))
+            headlines = saved.get("headlines")
+            if not isinstance(headlines, dict):
+                raise ValueError("facts check cache must include evidence headlines")
+            validate_fact_alerts(saved, headlines)
             warnings.extend(saved.get("warnings", []))
             return saved["alerts"]
     except (OSError, ValueError, TypeError):
@@ -227,5 +235,5 @@ def check_facts(issue_date: str, config: Config, runner: UnitRunner, cna: CNACli
         warnings.append("台灣事實檔更新檢查失敗，請稍後重試。")
         return []
     save_json(path, {"identity": identity, "alerts": result.data["alerts"],
-                     "urls": [entry.source.url for entry in evidence], "warnings": notices})
+                     "headlines": {entry.source.url: entry.source.title for entry in evidence}, "warnings": notices})
     return result.data["alerts"]
