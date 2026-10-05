@@ -1,0 +1,49 @@
+# 複製為 config.toml；所有設定均有預設值，不必建立設定檔也能執行。
+# 相對路徑以設定檔所在目錄為基準。
+[paths]
+data_dir = "data" # EPUB、快取、報告、狀態與日誌的目錄
+
+[source]
+repo = "hehonghui/awesome-english-ebooks" # GitHub 儲存庫
+branch = "master" # 來源分支
+folder = "01_economist" # 儲存庫內的期刊目錄
+
+[llm]
+backend = "gwg" # 透過本機 gwg 呼叫模型
+gwg_bin = "gwg" # gwg 執行檔名稱或完整路徑
+max_parallel = 2 # 同時呼叫數
+call_timeout_seconds = 300 # 單次呼叫逾時秒數
+no_account_wait_seconds = 900 # 無可用帳號時的等待秒數
+
+# 依序嘗試；第一個模型是主要模型。
+[llm.models]
+classify = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 分類
+pair = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 配對社論與報導
+summarize_a = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # A 級摘要
+summarize_b = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # B 級摘要
+summarize_c = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # C 級摘要
+summarize_d = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # D 級摘要
+summarize_e = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # E 級摘要
+brief = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 本週要聞
+english = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 英語學習
+
+[tiers]
+taiwan = { "1" = "A", "2" = "B", "3" = "C" } # 台灣相關程度對應摘要深度
+category = { "intl.us" = "C", "intl.china" = "C", "intl.asia" = "D", "intl.europe" = "D", "finance" = "D", "tech" = "D", "intl.other" = "E", "science" = "E", "culture" = "E" } # 一般分類的深度
+min_tier_by_kind = { briefing = "C" } # 特定文章種類至少達到的深度
+force_tier_by_kind = { letters = "E", obituary = "E" } # 強制指定的深度
+
+[english]
+level = "全民英檢中級（多益約 550–780，CEFR B1）" # 目標閱讀程度
+min_words = 600 # 英語選文最少字數
+max_words = 1300 # 英語選文最多字數
+vocab_count = 14 # 單字數
+phrase_count = 7 # 片語數
+
+[telegram]
+enabled = true # 啟用 Telegram 推送
+send_report_file = true # 附上完整報告檔案
+message_delay_seconds = 1.1 # 訊息間隔秒數
+
+# 密鑰使用環境變數或 ~/.config/econ-digest/env（權限建議 600）。
+# TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_ID、GITHUB_TOKEN 不放在此檔。
