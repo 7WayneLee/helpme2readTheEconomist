@@ -38,7 +38,6 @@
   - [模型路由與管線階段（Model Routing & Pipeline Stages）](#模型路由與管線階段model-routing--pipeline-stages)
   - [中央社證據檢索機制（CNA Research）](#中央社證據檢索機制cna-research)
   - [台灣事實清單維護（Fact Sheet Maintenance）](#台灣事實清單維護fact-sheet-maintenance)
-  - [本機 gwg 模型池與在地化](#本機-gwg-模型池與在地化)
 - [安裝](#安裝)
 - [Telegram、Telegraph 與頻道設定](#telegramtelegraph-與頻道設定)
   - [1. 建立 Telegram 機器人](#1-建立-telegram-機器人)
@@ -197,13 +196,16 @@ output/
 
 ### 私人網站發布（Private Site Publishing）
 
-透過 `config.toml` 中的 `[site]` 設定，系統能透過非互動式 SSH 與 `rsync` 自動將 `output/` 發布至您的私有 Web 伺服器：
+透過 `config.toml` 中的 `[site]` 設定，系統能透過非互動式 SSH 與 `tar` 串流自動將 `output/` 發布至您的私有 Web 伺服器：
+- **環境需求與預檢**：本機必須存在 `ssh` 與 `tar`，連線時會於遠端執行 `command -v tar` 預檢，確認遠端環境支援。
+- **暫存串流與原子替換**：將本期發布資料夾以 tar 封裝透過 SSH 串流傳輸至遠端暫存目錄（`.incoming/`），解開並確認權限後，以原子替換（atomic swap）方式部署至目標目錄（舊版目錄暫存為備份，若替換失敗自動還原；成功後清除備份）。
+- **失敗備援**：若發布失敗，摘要訊息自動省略網站連結，自動改以單檔 HTML 報告文件（`report.html`）作為附件備援。傳輸與部署均透過 SSH 與 tar 完成。
 
 ```toml
 [site]
 enabled = true
 base_url = "https://site.example.com"
-ssh_host = "my-vm"
+ssh_host = "your-server"
 remote_dir = "/var/www/site"
 ssh_timeout_seconds = 30
 ```
@@ -319,18 +321,34 @@ author_email = "you@example.com"
 
 ### 台灣關聯層級（Taiwan Levels）與外部查證約束
 
-為確保台灣專區報導具備實質意義與客觀依據，系統實施嚴格的關聯認定與查證防護機制：
+為確保台灣專區報導具備實質意義與客觀依據，系統實施嚴格的關聯認定、提及型態分類與查證防護機制：
 
-| 層級代號 | 層級名稱 | 判定定義（門檻嚴格化） | 預設摘要深度 |
+| 層級代號 | 層級名稱 | 判定定義與實質提及規則 | 預設摘要深度 |
 | :--- | :--- | :--- | :--- |
-| **T1** | 台灣本身 | 台灣是報導的主要主題。 | **Tier A**（深度解析） |
-| **T2** | 台灣與國際 | 台灣是國際事件的主要參與者之一，例如台美關係、兩岸、半導體供應鏈關鍵環節。 | **Tier B**（詳細摘要） |
-| **T3** | 間接相關 | 報導必須**實質提及台灣**（substantive mention）或具備**具體影響機制**（concrete mechanism）；若僅為廣義、泛論的地緣政治或區域安全論述，**一律判定為 T0（一般國際報導，不列入台灣專區）**。 | **Tier C**（重點摘要） |
+| **T1** | 台灣本身 | 台灣是報導的主要主題。原文實質討論台灣，陳述事實關聯，不可標記「（推論）」。 | **Tier A**（深度解析） |
+| **T2** | 台灣與國際 | 台灣是國際事件的主要參與者之一（如台美關係、兩岸、半導體供應鏈關鍵環節）。原文實質討論台灣，陳述事實關聯，不可標記「（推論）」。 | **Tier B**（詳細摘要） |
+| **T3** | 間接相關 | 報導**實質討論台灣**（substantive mention，如具體政策、歷史事件、對台政治訊息，至少為 T3 且如實陳述不加「（推論）」），或原文未提及但具備**具體影響機制**（如具名政策、貿易或供應鏈曝險、安全承諾、邦交國，必須標記「（推論）」開頭）。 | **Tier C**（重點摘要） |
+| **T0** | 無實質關聯 | 原文**路過提及**（incidental mention，如僅列於國家清單、借用台灣研究作他國案例，`mentions_taiwan = true`）或僅為泛泛地緣政治臆測，**一律維持 T0**，保留於各領域分類章節，不列入台灣專區。 | 各章節預設 Tier |
+
+#### 提及型態與分類判定規則（Classification Rules）
+1. **提及型態（`taiwan_mention_kind`）**：分類階段嚴格記錄三種型態之一：
+   - `substantive`（實質討論）：原文包含一段敘述、歷史事件、比較、政策或對台政治訊息（如中共對台宣傳或施壓）。此類報導**至少為 T3**，其 `taiwan_link` 必須如實陳述原文事實，**嚴禁標記「（推論）」**。
+   - `incidental`（路過提及）：僅在國家清單列名，或借用台灣研究、數據作為其他國家之案例。**維持 T0**，留在所屬領域分類章節，不進入台灣專區（但 `mentions_taiwan = true`）。
+   - `none`（未提及）：原文完全未提及台灣。只有在具備原文依據之具體機制（具名政策、貿易或供應鏈曝險、安全承諾、原文明列之邦交國）時才可判定為 T3，且其關聯陳述**必須以「（推論）」開頭**並說明具體機制；若無充分依據則為 T0。泛論「中國影響力擴大，所以台灣受影響」一律為 T0。
+2. **逐字證據（`taiwan_evidence`）**：凡有提及台灣（`kind != "none"`）或判定為非零層級（T1–T3），模型必須逐字摘錄輸入文章中的一個英文句子作為核對依據，確保判斷不憑空捏造；其餘為 `null`。
 
 #### 台灣查證（Grounding）防護守則
-1. **「對台灣的意涵」選填化**：「對台灣的意涵」為選填項目（Optional），僅在具備充分事實基礎或中央社查證證據時才撰寫；若無實質依據則完全留空，絕不牽強附會或臆測。
-2. **層級約束（單向收緊原則）**：外部證據可用於確認事實與具體影響，但**只能維持或調降層級**（例如將缺乏具體機制的候選文章由 T3 調降為 T0 回歸一般章節），**絕不能僅憑外部證據將原本非台灣主題的文章升級為 T1 或 T2**（避免外部事件喧賓奪主扭曲為台灣主導）。缺乏實質關聯陳述的文章，其台灣層級強制歸零（T0）。
-3. **查證出處標註行**：在私人網站、HTML 報告、Markdown 報告與 Telegraph 頁面中，台灣關聯陳述與意涵下方均附上至多 3 筆「依據：中央社 YYYY/MM/DD〈標題〉」超連結（Telegram 聊天室訊息不加來源行，保持簡潔）。
+1. **查證絕不調升台灣層級（Grounding Never Raises Level）**：查證階段**絕不調升**任何文章的台灣關聯層級：
+   - **本週焦點報導（T0）**：初判為 T0 的焦點報導一律維持 T0 並保留於「本週焦點」獨立章節與頁面；查證僅在其 Tier A 深度解析中補充具備中央社證據之「對台灣的意涵」，絕不改變其層級或改列入台灣專區。
+   - **初判 T1–T3 報導**：查證僅能維持或限縮降級（T1 可維持或限縮為 T2/T3/T0；T2 可維持或限縮為 T3/T0；T3 可維持或降為 T0）。
+2. **實質討論與推論規範**：
+   - **原文實質討論連結保留**：原文若屬實質討論（`substantive`），原文即為充分依據，系統嚴格保留其事實關聯敘述（如實陳述原文事實，不標記「（推論）」）。即使外部檢索無新證據，亦不刪除其事實關聯。
+   - **未提及台灣必加「（推論）」**：原文未提及台灣（`none`）之報導，其關聯陳述**一律必須以「（推論）」開頭**。若查證階段缺乏有效外部依據或關聯不足，其層級強制歸零（T0），回歸一般章節。
+3. **主軸因果約束（禁止次要事件連鎖推論）**：
+   - 台灣關聯陳述或意涵**必須直接源自報導的「主要主題」（MAIN subject）**。
+   - 嚴禁透過報導中僅順帶提及的次要事件進行連鎖推論（Chaining through passing mentions）——報導順帶提及之事件所引發的後續效應，既非該文章之台灣連結，亦不得作為「對台灣的意涵」。
+4. **「對台灣的意涵」選填化**：「對台灣的意涵」（`taiwan_implications`）為選填項目（0–3 筆），僅在具備充分事實基礎或外部證據時才撰寫；若無實質依據則完全留空，絕不湊數或牽強附會。
+5. **查證出處標註行**：在私人網站、HTML 報告、Markdown 報告與 Telegraph 頁面中，台灣關聯陳述與意涵下方均附上至多 3 筆「依據：中央社 YYYY/MM/DD〈標題〉」超連結（Telegram 聊天室訊息不加來源行，保持簡潔）。
 
 ### 本週焦點機制
 
@@ -383,7 +401,7 @@ author_email = "you@example.com"
    ↓
 [parse] 解析結構與段落
    ↓
-[classify] 透過 LLM 識別台灣關聯層級（嚴格判定 T1–T3；泛地緣政治為 T0）與領域分類
+[classify] 透過 LLM 識別台灣提及型態（substantive/incidental/none）與關聯層級（T1–T3；路過提及與泛論為 T0），記錄原文逐字證據與領域分類
    ↓
 [pair] 將 Leaders（經濟學人立場）與各章節專文進行關聯配對
    ↓
@@ -391,7 +409,7 @@ author_email = "you@example.com"
    ↓
 [summaries / brief / English] 平行呼叫 LLM 產出各級摘要、要聞速覽與英文研讀指南
    ↓
-[edit] 標題、一句話重點與要聞新聞專業編修（每批至多 20 項 / 15 KB，逐欄位驗證退回原文字）
+[edit] 標題、一句話重點與要聞新聞專業編修（每批至多 10 項 / 9,000 bytes，逐欄位驗證退回原文字）
    ↓
 [ground_queries + ground] 產生搜尋詞並檢索中央社證據，執行客觀台灣關聯查證（約束層級與意涵）
    ↓
@@ -401,7 +419,7 @@ author_email = "you@example.com"
    ↓
 [render & site build] 產生 Markdown、HTML 報告、Telegraph 頁面（獨立台灣頁）與 output/ 多頁網站（雙層導覽）
    ↓
-[site publish & backup] 透過 SSH rsync 發布私人網站，並將 output/ 備份至私有 GitHub 儲存庫
+[site publish & backup] 透過 SSH tar 串流暫存替換發布私人網站，並將 output/ 備份至私有 GitHub 儲存庫
    ↓
 [send] 推送 Telegram 單則核心導讀訊息（Instant View 連結與私人網站連結）與頻道推播
 ```
@@ -412,7 +430,7 @@ author_email = "you@example.com"
 | :--- | :--- |
 | `src/econ_digest/cli.py` | 命令列介面入口與參數解析。 |
 | `src/econ_digest/config.py` | TOML 設定檔載入、驗證與密鑰管理。 |
-| `src/econ_digest/site/` | 多頁網站建置（`build.py`，雙層導覽）、SSH rsync 發布（`publish.py`）與 Git 私有備份（`backup.py`）。 |
+| `src/econ_digest/site/` | 多頁網站建置（`build.py`，雙層導覽）、SSH tar 串流暫存替換發布（`publish.py`）與 Git 私有備份（`backup.py`）。 |
 | `src/econ_digest/analysis/editor.py` | 標題、一句話重點與要聞編修，支援批次切分與逐欄位安全驗證退回機制。 |
 | `src/econ_digest/analysis/grounding.py` | 台灣關聯查證（`ground_queries`、`ground`）與事實清單每週時效檢查（`facts`）。 |
 | `src/econ_digest/analysis/focus.py` | 評選本週 3 篇關鍵國際焦點專文並升級為 Tier A。 |
@@ -436,26 +454,30 @@ author_email = "you@example.com"
 | `summarize_b`~`e` | Gemini 3.8 Flash | Claude Sonnet 4.6 | 300 秒 | B 級詳細摘要、C 級重點摘要、D 級簡要摘要與 E 級單句摘要。 |
 | `brief` | Gemini 3.8 Flash | Claude Sonnet 4.6 | 300 秒 | "The world this week" 政治與商業要聞重點整理。 |
 | `english` | Gemini 3.8 Flash | Claude Sonnet 4.6 | 300 秒 | 候選文章評選（`english_pick`）與學習指南生成（`english_guide`）。 |
-| `edit` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 600 秒 | 標題、一句話重點與要聞之台灣新聞風格編修（每批至多 20 項 / 15 KB）。 |
-| `ground_queries` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 600 秒 | 針對涉台候選報導提出 1–3 組中央社繁體中文搜尋詞。 |
+| `edit` | Gemini 3.8 Flash | Claude Sonnet 4.6 | 900 秒 | 標題、一句話重點與要聞之台灣新聞風格編修（每批至多 10 項 / 9,000 bytes）。 |
+| `ground_queries` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 600 秒 | 針對涉台候選報導提出 1–3 組中央社繁體中文搜尋詞（共用 `ground` 模型與逾時設定）。 |
 | `ground` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 600 秒 | 結合中央社客觀證據查證台灣關聯與具體意涵（每批至多 3 篇 / 90 KB）。 |
 | `facts` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 300 秒 | 比對中央社最新要聞與台灣事實清單（`taiwan.md`）新鮮度。 |
 
 #### 路由與執行特性
 1. **模型分工與備援機制**：
-   - **Claude Opus 4.6 (thinking)**：主理最高思維深度任務（Tier A 深度解析、中文新聞編修 `edit`、關聯查證 `ground` 與事實更新檢查 `facts`）。若呼叫失敗自動降級至 Gemini 3.8 Flash。
-   - **Gemini 3.8 Flash**：主理高吞吐常規任務（初步分類、焦點評選、常規摘要、要聞速覽與英文選文）。若呼叫失敗自動切換至 Claude Sonnet 4.6。
+   - **Claude Opus 4.6 (thinking)**：主理最高思維深度任務（Tier A 深度解析 `summarize_a`、關聯查證 `ground`（`ground_queries` 亦共用此模型設定）與事實更新檢查 `facts`）。若呼叫失敗自動降級至 Gemini 3.8 Flash。
+   - **Gemini 3.8 Flash**：主理高吞吐常規任務（初步分類、焦點評選、常規摘要、要聞速覽、英文選文，以及標題與要聞編修 `edit`）。若呼叫失敗自動切換至 Claude Sonnet 4.6。
+   - **編修模型配置緣由**：在 2026-10-06 完整執行一期時，使用 Claude Opus 進行編修 pass（一期約 13 個區塊）耗盡了所有 gwg 帳號的 Claude 五小時額度；gwg 配額錯誤會使整個帳號進入冷卻狀態，連帶阻斷 Gemini 呼叫直到額度重設。因此 `edit` 預設優先使用 Gemini 3.8 Flash，並以 Claude Sonnet 4.6 作為備援。
 2. **階段逾時配置（`stage_timeout_seconds`）**：
-   因應 Opus 4.6 深度思考與批次文字校準運算，`edit` 與 `ground` 階段預設逾時設定為 **600 秒**；其餘階段維持全域 `call_timeout_seconds = 300` 秒。
-3. **每週預期執行時間（Expected Runtime）**：
-   相較於全 Flash 輕量管線，引入 Opus 4.6 (thinking) 與外部中央社檢索後，每週分析耗時有所增加。依據品質校準實測紀錄（[docs/research/quality-calibration-2026.10.03.md](docs/research/quality-calibration-2026.10.03.md)），光是 `edit`、`ground` 與 `facts` 階段回報之模型傳輸時間即約達 **15–25 分鐘**（單次實測傳輸為 928 秒至 1,500+ 秒），整期管線執行耗時約落在 **20–35 分鐘**數量級。維運時請確保定時器與系統服務逾時上限充足。
+   `LLMConfig.stage_timeout_seconds` 預設為 `{"edit": 900, "ground": 600}`。`ground_queries` 共用 `ground` 的 600 秒逾時門檻，其餘階段維持全域 `call_timeout_seconds = 300` 秒。
+3. **標題與一句話重點編修守衛（Validation Guard & Fallback）**：
+   在 `edit` 階段，標題與一句話重點（`headline_zh`）均受到嚴格驗證。一句話重點必須為單一自然句，長度 30–60 字且以「。」結尾（全句不得包含其他句號、全形空格、換行符號、問號或驚嘆號），且內容不得重複中文標題。若模型編修版本驗證失敗，系統會觸發逐欄位安全退回機制，保留前一階段之原文字。
+4. **每週預期執行時間（Expected Runtime）**：
+   相較於全 Flash 輕量管線，引入深度解析與外部中央社檢索後，每週分析耗時有所增加。依據 2026-10-06 實測數據，僅針對 `edit`、`ground` 與 `facts` 階段呼叫模型之重跑即耗時約 37 分鐘（其中 `edit` 包含 17 個區塊在 Gemini Flash 上以 parallel=2 執行，耗時約 30 分鐘，共消耗約 803k tokens；相較於早期 Opus 單區塊需 240–560 秒大幅提速）；若加上 2026-10-05 實測全新期別的前期階段（classify、pair、focus、summaries、brief、english 約 31 分鐘模型時間），整期管線預期執行耗時約落在 **45–60 分鐘**。Systemd 服務預設已配置 3 小時逾時上限（`TimeoutStartSec=3h`），緩衝充足無須額外調整。
 
 ### 中央社證據檢索機制（CNA Research）
 
 系統透過 `src/econ_digest/research/cna.py` 與中央通訊社（CNA）進行客觀事實檢索，嚴格遵守以下防護機制：
 - **網址路徑日期精確解析**：中央社新聞發布日期一律自新聞 URL 路徑直接解析（`/news/[a-z]+/(\d{8})\d+\.aspx$`，提取 `YYYYMMDD`），**絕不依賴搜尋引擎摘要呈現之可能錯誤日期**。
-- **禮貌頻率限制（Polite Rate Limit）**：對中央社發起的 HTTP 請求間隔至少保持 **1.0 秒**，避免對外部伺服器產生高頻負擔。
-- **短摘錄本機快取**：檢索結果僅提取新聞標題與前兩段（至多 200 字）作為純文字客觀證據，快取於 `data/research/`（由 `.gitignore` 排除，最多保留最近 500 筆，自動輪替淘汰），絕不於儲存庫或日誌中留存完整新聞文章。
+- **禮貌頻率限制與退避重試（Polite Rate Limit & Backoff）**：對中央社發起的 HTTP 請求間隔至少保持 **2.5 秒**（`REQUEST_INTERVAL = 2.5`）。若遇 HTTP 429 或 503 錯誤，會依標頭 `Retry-After`（支援秒數或 HTTP 日期）或指數退避（2.5 秒、5 秒、10 秒）自動重試至多 3 次。
+- **每次分析請求上限（Request Budget）**：每次分析設定 40 次 HTTP 請求上限（`cna_request_budget = 40`）；達標後停止對外發送請求，記錄警告通知（`中央社每次分析請求上限（40 次）已達；後續查證僅使用快取。`）並切換為僅使用本機快取查證。
+- **短摘錄快取與效期（Cache TTL）**：檢索結果僅提取新聞標題與前兩段（至多 200 字）純文字客觀證據，快取於 `data/research/`（由 `.gitignore` 排除）。搜尋結果快取效期為 7 天，文章短摘錄快取效期為 30 天，最多保留最近 500 筆，自動輪替淘汰。
 - **連線失敗優雅備援**：若中央社網路逾時或連線中斷，系統自動記錄警告（`中央社暫時無法連線；台灣關聯改以原文、事實檔與已取得的證據查證。`），流程持續進行，不會中斷崩潰。
 
 ### 台灣事實清單維護（Fact Sheet Maintenance）
@@ -471,13 +493,17 @@ author_email = "you@example.com"
   8. 台海現狀與共軍大規模演習歷史脈絡（環台軍演與灰色地帶常態化）
   9. 關鍵戰略定位補充（先進製程產能與無核電轉型）
 - **具體日期與溯源規範**：事實清單中每一項數據與事件，**必須具備明確的「截至日期」與具體中央社（CNA）或官方新聞稿 URL**，嚴禁無依據之條目。
-- **每週自動新鮮度檢查**：每週管線之 `facts` 階段會自中央社抓取最新要聞比對事實清單，若偵測到潛在異動，會於私人聊天室發送私密訊息：
-  ```
-  ⚠️ 台灣事實檔可能需要更新：
-  • 邦交國概況 → 友邦動態異動（中央社）
-  （請確認）
-  ```
-  （此警報訊息僅發送至私人聊天室，頻道與公開頁面絕不呈現）。
+- **每週自動新鮮度檢查（已發生事實認定原則）**：
+  每週管線之 `facts` 階段會自中央社抓取最新要聞比對事實清單：
+  - **僅通報已實際發生的重大事實變更**（如已就職、已請辭、已斷交、立法院已三讀通過、官方已公布最終正式數據）。
+  - **排除未來式與未定事件**：競選言論、表態支持（背書）、提名、民調、預測、籌備規劃與假設條件句一律不採計；選舉結果僅在投票日當天或之後方得採計。
+  - 若偵測到實際發生的重大事實變更，會在 Telegram 私人聊天室發送私密訊息提醒（至多 5 則；每則警報帶有 `evidence_title`，必須逐字等於所引用之中央社新聞標題，並作為超連結文字呈現；無標題之舊式警報則顯示為「中央社」）：
+    ```
+    ⚠️ 台灣事實檔可能需要更新：
+    • <事實檔說法> → <已完成的疑似新值與日期>（〈<中央社標題>〉）
+    （請確認）
+    ```
+    （此警報訊息僅發送至私人聊天室，頻道與公開頁面絕不呈現）。
 - **維護與更新工作流**：
   維運人員收到通知後，點擊連結確認中央社報導屬實，即可手動編輯更新 `src/econ_digest/facts/taiwan.md`，並提交推送：
   ```sh
@@ -492,9 +518,9 @@ author_email = "you@example.com"
 
 ### 系統需求
 - **Python**：>= 3.11
-- **gwg**：已於系統中安裝並登入，且位於 `PATH` 中。
+- **gwg**：已於系統中安裝並登入，且位於 `PATH` 中。（若遇 Claude 五小時額度耗盡導致所有帳號回報 `exit 75` / `no free account` 並使整帳號冷卻連帶阻斷 Gemini，管線會等待至多 `no_account_wait_seconds` 且快取單元保持有效；可透過 `gwg usage --json` 與 `gwg status` 檢查重設時點後重跑，或於 `config.toml` `[llm.models]` 將繁重階段暫時切換至 Flash）。
+- **ssh 與 tar**：用於私人網站發布（本機需具備 `ssh` 與 `tar`，遠端主機亦需安裝 `tar`；傳輸全面採用 SSH tar 串流）。
 - **opencc**（建議安裝）：`sudo apt install opencc`。
-- **rsync / ssh**：用於私人網站發布。
 - **git**：用於 `output/` 私有儲存庫備份。
 
 ### 安裝步驟
@@ -618,7 +644,7 @@ gwg_bin = "gwg"
 max_parallel = 2
 call_timeout_seconds = 300
 no_account_wait_seconds = 900
-stage_timeout_seconds = { edit = 600, ground = 600 }
+stage_timeout_seconds = { edit = 900, ground = 600 }
 
 [llm.models]
 classify = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
@@ -631,7 +657,8 @@ summarize_d = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
 summarize_e = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
 brief = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
 english = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
-edit = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"]
+# 使用 Claude Opus 時，一期 13 個編修區塊曾耗盡所有帳號的 Claude 五小時額度並使整帳號冷卻，因此編修預設優先使用 Gemini Flash
+edit = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
 ground = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"]
 facts = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"]
 
