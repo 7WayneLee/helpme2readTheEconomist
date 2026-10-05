@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..models import BriefItem, Digest
-from ..telegram.format import blockquote, bold, escape, italic, pack_blocks, split_html
+from ..telegram.format import blockquote, bold, escape, italic, pack_blocks, split_html, utf16_len
 from .common import (Entry, english_article, merged_leader_titles, metadata, overview,
                      sections, summary_fields, title, word_count_label)
 
@@ -95,6 +95,12 @@ def english_blocks(digest: Digest) -> list[str]:
     return result
 
 
+def section_messages(blocks: list[str], label: str, limit: int) -> list[str]:
+    prefix = bold(label + "（續）") + "\n\n"
+    messages = pack_blocks(blocks, limit - utf16_len(prefix), continuation_prefix="")
+    return [message if index == 0 else prefix + message for index, message in enumerate(messages)]
+
+
 def render_telegram(digest: Digest, limit: int = 4000) -> list[str]:
     result = split_html(overview_html(digest), limit)
     groups = sections(digest)
@@ -104,8 +110,8 @@ def render_telegram(digest: Digest, limit: int = 4000) -> list[str]:
         for entry in section.entries:
             result.extend(split_html(full_taiwan_html(digest, entry), limit))
     if groups[2].entries:
-        result.extend(pack_blocks([bold("🇹🇼 三、間接相關（T3）"), *[compact_html(digest, entry, taiwan=True) for entry in groups[2].entries]], limit))
+        result.extend(section_messages([bold("🇹🇼 三、間接相關（T3）"), *[compact_html(digest, entry, taiwan=True) for entry in groups[2].entries]], "台灣 T3", limit))
     for section in groups[3:]:
-        result.extend(pack_blocks([bold(section.title), *[compact_html(digest, entry) for entry in section.entries]], limit))
-    result.extend(pack_blocks(english_blocks(digest), limit))
+        result.extend(section_messages([bold(section.title), *[compact_html(digest, entry) for entry in section.entries]], section.title, limit))
+    result.extend(section_messages(english_blocks(digest), "英文學習選文", limit))
     return result

@@ -72,7 +72,8 @@ class JSONClient:
             repaired = False
             retried = False
             while True:
-                logger.debug("LLM stage=%s model=%s prompt=%s", stage, model, current_prompt[:200])
+                logger.debug("LLM stage=%s model=%s prompt=%s", stage, model,
+                             current_prompt[:200].replace("\r", " ").replace("\n", " "))
                 attempt = self._invoke(current_prompt, model, stage, effective_timeout)
                 data: dict[str, Any] | None = None
                 if attempt.kind == "success":

@@ -14,7 +14,8 @@ from econ_digest.models import Digest, Issue, load_json
 from conftest import answer, article, issue
 
 
-def test_digest_normalisation_cache_and_persistence(analysis_config: Config, tmp_path: Path) -> None:
+def test_digest_normalisation_cache_and_persistence(analysis_config: Config, tmp_path: Path,
+                                                  monkeypatch: pytest.MonkeyPatch) -> None:
     source = issue([article("a1", words=800), article("a2"),
                     article("p1", kind="world_politics", paragraphs=["Synthetic news."]),
                     article("b1", kind="world_business", paragraphs=["Synthetic business."]),
@@ -40,10 +41,31 @@ def test_digest_normalisation_cache_and_persistence(analysis_config: Config, tmp
     assert len(digest.llm_calls) == 5 and all(stat.ok for stat in digest.llm_calls)
     saved = analysis_config.paths.data_dir / "issues" / "te_2026.10.03" / "digest.json"
     assert load_json(saved, Digest).to_dict() == digest.to_dict()
+    import json
+    from econ_digest.analysis import pipeline
+    from econ_digest.analysis.cache import CACHE_FORMAT_VERSION
+    envelope = json.loads(next(cache.glob("classify-*.json")).read_text())
+    assert envelope["format_version"] == CACHE_FORMAT_VERSION
+    assert envelope["data"]["articles"][0]["title_zh"] == "特朗普宣布软件产业的新计划"
     second = FakeLLMClient(lambda *args: AssertionError("cache must prevent calls"))
     rerun = analyze_issue(source, analysis_config, second, workdir=cache)
     assert second.calls == [] and rerun.llm_calls == []
     assert rerun.english.to_dict() == digest.english.to_dict()
+    original_normalize = pipeline.normalize_tree
+
+    def updated_normalize(value: Any, **kwargs: Any) -> Any:
+        result = original_normalize(value, **kwargs)
+        result["classifications"]["a1"]["title_zh"] = "更新後的中文標題"
+        result["summaries"]["a1"]["headline_zh"] = "残留问题"
+        return result
+
+    monkeypatch.setattr(pipeline, "normalize_tree", updated_normalize)
+    updated = analyze_issue(source, analysis_config, second, workdir=cache)
+    assert second.calls == [] and updated.llm_calls == []
+    assert updated.classifications["a1"].title_zh == "更新後的中文標題"
+    assert updated.issue.to_dict() == source.to_dict()
+    assert any("簡體字" in warning and "题" in warning for warning in updated.warnings)
+    assert json.loads(next(cache.glob("classify-*.json")).read_text()) == envelope
 
 
 def test_missing_ids_uses_client_repair(analysis_config: Config, example_issue: Issue, tmp_path: Path) -> None:
@@ -164,6 +186,29 @@ def test_corrupt_cache_is_regenerated(analysis_config: Config, example_issue: Is
     fake = FakeLLMClient(answer)
     analyze_issue(example_issue, analysis_config, fake, workdir=cache)
     assert len(fake.calls) == 1 and fake.calls[0][2] == "classify"
+
+
+@pytest.mark.parametrize("version", [None, 1])
+def test_old_normalised_cache_is_regenerated_once(analysis_config: Config, example_issue: Issue,
+                                                 tmp_path: Path, version: int | None) -> None:
+    import json
+    from econ_digest.analysis.cache import CACHE_FORMAT_VERSION
+    cache = tmp_path / "analysis"
+    analyze_issue(example_issue, analysis_config, FakeLLMClient(answer), workdir=cache)
+    path = next(cache.glob("classify-*.json"))
+    envelope = json.loads(path.read_text())
+    if version is None:
+        del envelope["format_version"]
+    else:
+        envelope["format_version"] = version
+    path.write_text(json.dumps(envelope))
+    fake = FakeLLMClient(answer)
+    analyze_issue(example_issue, analysis_config, fake, workdir=cache)
+    assert len(fake.calls) == 1 and fake.calls[0][2] == "classify"
+    assert json.loads(path.read_text())["format_version"] == CACHE_FORMAT_VERSION
+    warm = FakeLLMClient(lambda *args: AssertionError("cache must prevent calls"))
+    analyze_issue(example_issue, analysis_config, warm, workdir=cache)
+    assert warm.calls == []
 
 
 def test_limited_run_preserves_full_digest(analysis_config: Config, example_issue: Issue, tmp_path: Path) -> None:
