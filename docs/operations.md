@@ -1,6 +1,6 @@
 # 維運與故障排除指南 (Operations and Troubleshooting)
 
-本文件提供 `econ-digest` 每週導讀系統的日常維運、狀態檢查、手動介入方式與常見問題排查指南。
+本文件提供 `econ-digest` 每週導讀系統的日常維運、狀態檢查、私人網站與備份管理、手動介入方式與常見問題排查指南。
 
 ---
 
@@ -9,22 +9,38 @@
 - [日常維運](#日常維運)
   - [日誌位置與檢視方式](#日誌位置與檢視方式)
   - [檢查定時器與服務狀態](#檢查定時器與服務狀態)
-  - [手動觸發與重新發送](#手動觸發與重新發送)
+  - [手動觸發與傳送機制](#手動觸發與傳送機制)
+  - [接續中斷的傳送（斷點續傳）](#接續中斷的傳送斷點續傳)
+  - [重新發送已完成期別（`send --force`）](#重新發送已完成期別send---force)
+  - [離線預覽檢視（`send --dry-run`）](#離線預覽檢視send---dry-run)
+  - [原地維護更新（`send --pages-only`）](#原地維護更新send---pages-only)
   - [重設單期快取](#重設單期快取)
   - [更新詞彙對照表後重建報告](#更新詞彙對照表後重建報告)
+- [私人網站發布與備份維運](#私人網站發布與備份維運)
+  - [伺服器規格與 Caddyfile 配置](#伺服器規格與-caddyfile-配置)
+  - [發布流程與 SSH/rsync 機制](#發布流程與-sshrsync-機制)
+  - [發布失敗自動備援機制](#發布失敗自動備援機制)
+  - [私有 GitHub 儲存庫備份維運](#私有-github-儲存庫備份維運)
+- [Telegram 私人聊天室與頻道維運](#telegram-私人聊天室與頻道維運)
+  - [私人聊天室傳送流程](#私人聊天室傳送流程)
+  - [頻道推播管理（`--channel`）](#頻道推播管理--channel)
 - [問題排查速查表](#問題排查速查表)
 - [常見問題深度排查](#常見問題深度排查)
   - [1. gwg: User location is not supported](#1-gwg-user-location-is-not-supported)
   - [2. gwg exit 75 / no free account](#2-gwg-exit-75--no-free-account)
   - [3. 模型配額耗盡 (Quota Exhaustion)](#3-模型配額耗盡-quota-exhaustion)
   - [4. Telegram: can't parse entities](#4-telegram-cant-parse-entities)
-  - [5. 缺少 Token 或 Chat ID](#5-缺少-token-或-chat-id)
+  - [5. 缺少 Token、Chat ID 或 Channel ID](#5-缺少-tokenchat-id-或-channel-id)
   - [6. 執行失敗與重試機制 (Failed Run)](#6-執行失敗與重試機制-failed-run)
   - [7. 執行鎖衝突 (Lock already held)](#7-執行鎖衝突-lock-already-held)
   - [8. Telegraph: FLOOD_WAIT_N](#8-telegraph-flood_wait_n)
   - [9. 缺少或無效的 Telegraph Access Token](#9-缺少或無效的-telegraph-access-token)
   - [10. Telegraph 頁面超出容量上限 (Page Size Limit)](#10-telegraph-頁面超出容量上限-page-size-limit)
-  - [11. Telegraph 頁面維護與模式限制 (send --pages-only)](#11-telegraph-頁面維護與模式限制-send---pages-only)
+  - [11. 原地維護機制與模式限制 (`send --pages-only`)](#11-原地維護機制與模式限制-send---pages-only)
+  - [12. 私人網站發布與 SSH / rsync 失敗排查](#12-私人網站發布與-ssh--rsync-失敗排查)
+  - [13. Telegram 內建瀏覽器無法處理 Basic Auth 彈窗問題](#13-telegram-內建瀏覽器無法處理-basic-auth-彈窗問題)
+  - [14. 網站備份 push 失敗排查](#14-網站備份-push-失敗排查)
+  - [15. 英文學習選文或指南失敗與容錯機制](#15-英文學習選文或指南失敗與容錯機制)
 
 ---
 
@@ -32,39 +48,34 @@
 
 ### 日誌位置與檢視方式
 
-系統提供兩種層級的日誌輸出：應用程式專屬滾動檔案日誌與 systemd 使用者單元日誌。
+系統提供兩種類型的日誌輸出：應用程式專屬滾動檔案日誌與 systemd 使用者單元日誌。
 
 #### 1. 應用程式檔案日誌
 - **預設路徑**：`data/logs/econ-digest.log`
-- **輪替機制**：單一檔案大小上限為 2 MB，自動保留最近 3 份歷史輪替檔案（`econ-digest.log.1`、`.2`、`.3`）。
-- **隱私安全**：所有敏感憑證（包括 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`、`GITHUB_TOKEN`、`TELEGRAPH_ACCESS_TOKEN` 以及 Telegram API URL 中的 Bot Token）在寫入日誌時均會自動遮蔽為 `[已隱藏]`。
-- **即時檢視指令**：
+- **輪替機制**：單檔上限 2 MB，自動保留最近 3 份歷史檔案（`econ-digest.log.1`、`.2`、`.3`）。
+- **機密遮蔽**：所有敏感憑證（`TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`、`TELEGRAM_CHANNEL_ID`、`GITHUB_TOKEN`、`TELEGRAPH_ACCESS_TOKEN`）在寫入日誌時均會自動過濾並遮蔽為 `[已隱藏]`。
+- **檢視指令**：
   ```sh
-  # 持續監控最新日誌輸出
+  # 即時追蹤最新日誌輸出
   tail -f data/logs/econ-digest.log
 
-  # 檢視最近的錯誤紀錄
+  # 檢視最近的警告與錯誤
   grep -E 'WARNING|ERROR' data/logs/econ-digest.log | tail -n 50
   ```
 
 #### 2. systemd 服務日誌
-定時器觸發的執行紀錄會直接串接至 systemd journal：
+定時器觸發的執行紀錄會直接記錄至 systemd journal：
 ```sh
-# 即時追蹤使用者服務輸出
+# 即時追蹤使用者服務日誌
 journalctl --user -u econ-digest.service -f
 
-# 檢視本次開機週期內的執行紀錄
-journalctl --user -u econ-digest.service -b
-
-# 檢視最近 100 行紀錄（不分頁）
+# 檢視最近 100 行紀錄
 journalctl --user -u econ-digest.service -n 100 --no-pager
 ```
 
 ---
 
 ### 檢查定時器與服務狀態
-
-若已透過 `deploy/install-user-timer.sh` 安裝使用者排程，可使用下列指令監控運作狀態：
 
 ```sh
 # 1. 檢查定時器排程、下次觸發時間與上次執行結果
@@ -73,139 +84,247 @@ systemctl --user list-timers econ-digest.timer
 # 2. 查看定時器單元詳細狀態
 systemctl --user status econ-digest.timer
 
-# 3. 查看最近一次執行的背景服務單元狀態（執行時間與退出碼）
+# 3. 查看背景服務單元狀態
 systemctl --user status econ-digest.service
 ```
 
 > [!NOTE]
-> 使用者定時器預設在登入狀態下運作。若要在登出伺服器後持續在背景執行，請確認已啟用 lingering：
+> 若要在使用者登出伺服器後持續運行定時器，請確認已啟用 lingering：
 > ```sh
 > loginctl enable-linger "$USER"
 > ```
 
 ---
 
-### 手動觸發與重新發送
+### 手動觸發與傳送機制
 
 #### 手動立即執行完整流程
-無須等待週末排程，可隨時手動觸發 systemd 服務或直接在命令列執行：
 ```sh
 # 透過 systemd 背景啟動
 systemctl --user start econ-digest.service
 
-# 或直接在終端機前台執行（顯示即時進度）
+# 或直接在前台執行（即時輸出進度）
 .venv/bin/econ-digest run
 ```
 
-#### Telegraph 模式每週傳送順序與機制
-在預設的 Telegraph 傳送模式下，執行 `send` 指令時，系統依序發送三階段內容至 Telegram 私人聊天室：
-1. **封面照片搭配摘要圖說（`send_photo`）**：
-   - 以當期《經濟學人》封面照片發送，圖說為核心摘要（包含期別標題概覽 overview、粗體「**與台灣相關**」焦點標題條列與 4 個 Instant View 分頁超連結）。
-   - **字數超限容錯**：若圖說超過 Telegram 的 1024 字元（UTF-16 單位）上限，系統會自動精簡圖說（暫時省略與台灣相關焦點）；若仍超過 1024 字元，封面圖說僅保留期別標題，並將完整摘要作為下一則獨立文字訊息發送。
-   - **無封面回退**：若電子書缺少封面照片或設定 `[telegram] cover_photo = false`，系統自動回退為發送純文字摘要訊息。
-   - **無國旗設計原則**：系統各國新聞均不使用國旗 emoji（其他國家要聞亦不加國旗），以文字標籤維持中立與排版整潔。
-2. **英文選文原文私密傳送**：
-   - 緊隨摘要之後，將英文選文全文以 Telegram 可展開／收合的引用區塊「**📖 英文選文原文（點開）**」（篇幅長時以「**📖 英文選文原文（續）**」接續分則）私密傳送。
-3. **完整圖文 HTML 報告檔案（`send_document`）**：
-   - 發送內嵌完整封面、文章插圖、圖表地圖與本週漫畫之獨立 HTML 報告（`report.html`，單檔約 7–8 MB），附帶圖說「**完整報告（含插圖與英文選文原文）**」（由 `[telegram] send_report_file` 控制，預設已恢復為 `true`；圖片內嵌由 `[report] embed_images` 控制，預設 `true`）。
+#### Telegraph 模式每週傳送機制
+在預設的 Telegraph 傳送模式下，執行 `send` 指令時，系統向 Telegram 私人聊天室發送**單則訊息（ONE message）**：
+1. **單則 Telegram 核心導讀訊息**：
+   - **刊期標題與當期概覽**（Overview）。
+   - **「與台灣相關」焦點清單**（粗體標題與條列至多 3 則關鍵報導；各國新聞均不使用國旗 emoji）。
+   - **Instant View 主題分頁超連結（無數字編號）**：
+     - 本週導讀
+     - 本週焦點（由模型評選 3 篇除台灣外最重要報導升為 Tier A 深度解析，獨立設頁不重複）
+     - 國際
+     - 財經・科技・文化
+     - 英文學習
+     （*僅列出當期實際存在之頁面；若無內容則自動省略該章節與連結*）
+   - **「🔒 圖文完整版（需帳密）」連結**：導向架設於私有伺服器之多頁式圖文完整版網站。
+2. **大圖預覽與封面首圖**：
+   - 每一個 Telegraph 頁面開頭均以當期封面圖為首圖（帶圖說「本期封面：…」）。
+   - Telegram 會辨識連結並採用大圖卡（Large media）預覽，直接在聊天室展示封面照片；點擊 Instant View 即可在原生介面極速展開閱讀。
+3. **選用舊版行為（預設皆為 `false`）**：
+   - `cover_photo = false`：設為 `true` 時，將封面改為獨立相片訊息發送。
+   - `original_text_messages = false`：設為 `true` 時，會在聊天室以私訊摺疊區塊隨附英文原文。
+   - `send_report_file = false`：設為 `true` 時，會在聊天室發送單檔 HTML 報告文件（`report.html`）。*注意：若私人網站發布失敗，系統會自動 fallback 附送此單檔報告*。
 
-> [!IMPORTANT]
-> **Telegraph 頁面純文字與版權隱私防護原則**
-> Telegraph 頁面為公開網址，任何持有連結者皆可瀏覽存取。為保護著作權與個人閱讀隱私：
-> - **Telegraph 頁面一律維持純文字（Text-Only）**，絕不包含任何期刊圖片、封面照片、文章插圖、圖表或漫畫，亦絕對不放上《經濟學人》原始文章之英文全文。
-> - 插圖與英文原始全文**一律僅於 Telegram 私人聊天室（照片圖說、私訊摺疊區塊、文件附件）以及本機私密報告檔案流通**。
-> - Markdown 報告（`report.md`）亦維持純文字排版，不內嵌圖片。
+---
 
-#### 接續中斷的傳送（斷點續傳）
-若在發布 Telegraph 頁面或推送至 Telegram 期間網路斷線或發生暫時性錯誤，直接再次執行 `send` 指令即可：
+### 接續中斷的傳送（斷點續傳）
+
+若在建立 Telegraph 頁面、發布網站或推送訊息期間網路斷線：
 ```sh
 .venv/bin/econ-digest send
 ```
-系統會自動讀取 `data/issues/te_<期別>/telegram_progress.json` 中的進度指標（包含 `pages_published` 頁面發布狀態與 `next_message` 訊息傳送索引），自動跳過已發布之頁面與已發送之訊息，接續傳送剩餘內容。
+系統會自 `data/issues/te_<期別>/telegram_progress.json` 讀取發送進度（`pages_published` 頁面發布狀態、`next_message` 索引、`channel_sent` 與 `document_sent`），跳過已完成之項目，接續完成剩餘工作。
 
-#### 重新發送已完成期別（原地編輯與強制重送）
-若某期先前已發送完畢（已記錄於 `state.json` 的 `delivered` 中），系統預設會略過以避免干擾。若需強制重新發送全部內容：
+---
+
+### 重新發送已完成期別（`send --force`）
+
+若某期先前已記錄為發送完成（存於 `state.json` 的 `delivered` 中），欲強制重新發布與傳送：
 ```sh
 # 重新發送最新一期
 .venv/bin/econ-digest send --force
 
-# 或重新發送特定期別
+# 或指定特定期別
 .venv/bin/econ-digest send --issue 2026.10.03 --force
 ```
-- **Telegraph 原地編輯（In-Place Edit）**：在預設的 Telegraph 模式下，`--force` 不會重複產生新的公開網址，而是讀取 `data/issues/te_<期別>/telegraph_pages.json`，對既有的 Telegraph 頁面進行**原地編輯（EDIT）**更新內容。網址維持完全相同，先前已推送至 Telegram 聊天室的 Instant View 預覽與連結均持續有效；若因調整摘要深度使分頁數量減少，多餘的舊頁面會自動被編輯為標題「此頁已不再使用」（並提供回當期第一頁之超連結）。
-- **Messages 模式行為**：若設定檔中為 `[telegram] delivery = "messages"`，則 `--force` 會自第一則起重新發送全部切分訊息。在此模式下，文章標題冠上「T1 · …」等關聯層級代碼（例如 `<b>T1 · 文章標題</b>`），清晰識別重要程度；其他國家的新聞亦不使用國旗 emoji 標示。
+- **Telegraph 原地編輯（In-Place Edit）**：系統會讀取既有的 `telegraph_pages.json`，對已發布的 Telegraph 頁面進行**原地編輯（EDIT）**更新內容。網址維持完全不變，先前已送出的 Instant View 連結持續有效。
+- **網站重新發布與備份**：重新建置 `output/` 網站、rsync 同步至遠端伺服器，並 push 備份至私有儲存庫。
+- **Messages 模式行為**：若設定檔中為 `[telegram] delivery = "messages"`，則自第一則起重新發送全部切分訊息。
 
-#### 離線預覽檢視（Dry-run）
-若欲在不對外建立 Telegraph 頁面且不向 Telegram 發送任何訊息的情況下，檢查頁面排版與大小，可加上 `--dry-run` 旗標：
+---
+
+### 離線預覽檢視（`send --dry-run`）
+
+若欲在不建立 Telegraph 頁面、不發布網站、不備份且不向 Telegram 發送任何訊息的情況下預覽輸出排版：
 ```sh
 .venv/bin/econ-digest send --dry-run
 ```
-終端機會列印出所有分頁標題、以預覽網址計算的 UTF-8 JSON 位元組大小（驗證是否低於 `page_limit_bytes`），以及即將發送至 Telegram 的封面照片圖說、摘要訊息與英文選文私訊摺疊區塊。
+終端機會列印出預計發布的私人網站網址、備份規劃、各分頁標題與 UTF-8 位元組大小，以及即將送出的單則 Telegram 訊息內容與頻道訊息。
 
-#### 僅原地更新 Telegraph 頁面（`send --pages-only`）
-若在修訂摘要提示詞、正體字對照表或修正報告文字後，需要更新已發布的 Telegraph 頁面，但**不想向 Telegram 私人聊天室再次發送任何訊息**（避免打擾手機端），可使用 `--pages-only` 旗標：
+---
+
+### 原地維護更新（`send --pages-only`）
+
+在微調了摘要提示詞、正體字對照表（`glossary.tsv`）或修改文章內容後，若希望同步更新已發布的 Telegraph 頁面、重新建置並發布私人網站，並執行 GitHub 備份，但**完全不向 Telegram 私人聊天室或頻道發送任何訊息**（避免打擾手機端讀者）：
 ```sh
-# 1. 離線預覽 Telegraph 各分頁標題與 UTF-8 位元組大小（不發布）
+# 1. 離線預覽各分頁標題與大小（不發布）
 .venv/bin/econ-digest send --pages-only --dry-run
 
-# 2. 原地更新 Telegraph 頁面
+# 2. 執行重建網站、重新發布、更新 Telegraph 頁面與備份
 .venv/bin/econ-digest send --pages-only
 
 # 或指定特定期別
 .venv/bin/econ-digest send --issue 2026.10.03 --pages-only
 ```
-- **維持網址與進度不變**：程式會讀取 `data/issues/te_<期別>/telegraph_pages.json`，對既有的 Telegraph 頁面進行**原地編輯（EDIT）**，公開網址維持不變，已推送至 Telegram 的連結持續有效。
-- **不更動狀態**：不會向 Telegram 私人聊天室發送任何訊息，亦不會修改 `telegram_progress.json` 的傳送進度或 `state.json` 的已傳送紀錄。
-- **模式限制**：`--pages-only` 僅適用於 Telegraph 傳送模式（`[telegram] delivery = "telegraph"`）。若在 messages 模式下執行，程式會輸出 `--pages-only 僅適用於 Telegraph 模式；請將 telegram.delivery 設為 telegraph。` 並以結束代碼 2 退出。
+- **完整維護動作**：
+  1. 重建本地多頁網站（`output/`）。
+  2. rsync 發布更新至遠端 Web 伺服器（若 `[site] enabled = true`）。
+  3. 對既有的 Telegraph 頁面進行**原地編輯（EDIT）**（網址維持不變）。
+  4. 提交並 push 至私有 GitHub 儲存庫（若 `[backup] enabled = true`）。
+- **零干擾保障**：不發送任何 Telegram 聊天室或頻道訊息，亦不修改 `state.json` 的 `delivered` 傳送狀態。
+- **模式限制**：`--pages-only` 僅適用於 Telegraph 傳送模式（`[telegram] delivery = "telegraph"`）。若在 messages 模式下執行，會提示錯誤並退出。
 
 ---
 
 ### 重設單期快取
 
-若特定期別因提示詞變更或模型輸出不理想，需全部重新分析：
-
-#### 方法一：使用命令列參數（推薦）
+若特定期別因模型輸出異常需全部重新分析：
 ```sh
-# 清除本期分析快取並重新呼叫模型分析
+# 使用命令列參數（推薦）
 .venv/bin/econ-digest analyze --issue 2026.10.03 --reanalyze
 
-# 或在完整管線中清除快取並強制重跑發送
+# 或在完整管線中重新分析並發送
 .venv/bin/econ-digest run --issue 2026.10.03 --reanalyze --force
 ```
-
-#### 方法二：手動刪除快取檔案
-可直接刪除該期別目錄下的分析快取目錄與導讀摘要檔案：
+亦可手動刪除快取檔案：
 ```sh
 rm -rf data/issues/te_2026.10.03/analysis
 rm -f data/issues/te_2026.10.03/digest.json
 ```
-> [!TIP]
-> 手動刪除時請保留 `TheEconomist.2026.10.03.epub` 與 `issue.json`，如此系統在重新分析時無須重新自 GitHub 下載或重新剖析電子書結構。
+（*請保留 `.epub` 與 `issue.json`，免於重複下載與解析。*）
 
 ---
 
 ### 更新詞彙對照表後重建報告
 
-系統的單元級快取（版本 2）儲存的是通過結構驗證、但**尚未執行台灣正體在地化（zh-TW normalisation）**的原始輸出；正體化轉換與詞彙替換是在組裝完整導讀資料（`digest.json`）時才執行。
-
-若維運期間編輯或擴充了 `src/econ_digest/zhtw/glossary.tsv` 中的在地化慣用語對照表，**不需要**清除快取或重新呼叫模型，可直接依序執行下列指令重建報告：
-
+系統的單元級快取（版本 2）儲存的是未經正體化轉換前的原始輸出。若編輯或擴充了 `src/econ_digest/zhtw/glossary.tsv`，**不需要**消耗模型額度重新分析，直接執行下列指令即可：
 ```sh
-# 1. 重新組裝導讀（所有單元直接從快取讀取，不消耗模型配額，重新套用最新 glossary.tsv）
+# 1. 重新組裝導讀（全數從快取載入，套用最新 glossary.tsv）
 .venv/bin/econ-digest analyze --issue 2026.10.03
 
-# 2. 重新渲染 Markdown、HTML 報告與 Telegram 訊息切塊
+# 2. 重新渲染報告與訊息
 .venv/bin/econ-digest render --issue 2026.10.03
+
+# 3. 原地更新網站與 Telegraph 頁面（不干擾聊天室）
+.venv/bin/econ-digest send --issue 2026.10.03 --pages-only
 ```
 
-- 若欲將更新後的內容重新推送到 Telegram 私人聊天室（包含重新發送封面照片、私密原文與完整報告檔案）：
-  ```sh
-  .venv/bin/econ-digest send --issue 2026.10.03 --force
-  ```
-- 若**僅欲原地更新 Telegraph 頁面而不向 Telegram 私人聊天室發送任何訊息**（保留進度與傳送狀態）：
-  ```sh
-  .venv/bin/econ-digest send --issue 2026.10.03 --pages-only
-  ```
+---
+
+## 私人網站發布與備份維運
+
+### 伺服器規格與 Caddyfile 配置
+
+私人網站由 `output/` 目錄建構而成，透過 SSH 上傳至遠端 Web 伺服器。伺服器配置建議使用 Caddy，通用要求如下：
+1. **全站 Basic Auth**：除封面圖目錄外，所有 HTML 頁面、插圖與 EPUB 下載皆受帳號密碼保護。
+2. **公開 `/covers/` 路徑**：Telegraph 伺服器需要讀取封面圖片以顯示 Instant View 封面。發布時封面會以 32 碼隨機檔名放置於 `/covers/`，此路徑免驗證。
+3. **防止搜尋引擎檢索**：加入 `X-Robots-Tag: noindex, noarchive`。
+
+Caddy 範例設定（`Caddyfile`）：
+```caddy
+site.example.com {
+    root * /var/www/site
+    encode gzip zstd
+
+    # 防止搜尋引擎索引
+    header X-Robots-Tag "noindex, nofollow, noarchive"
+
+    # Telegraph 讀取封面圖專用路徑（公開免密碼）
+    @covers path /covers/*
+    handle @covers {
+        file_server
+    }
+
+    # 其餘所有路徑一律要求帳號密碼
+    handle {
+        basicauth {
+            username $2a$14$...hashed_password...
+        }
+        file_server
+    }
+}
+```
+
+### 發布流程與 SSH/rsync 機制
+
+在 `config.toml` 中配置 `[site]`：
+```toml
+[site]
+enabled = true
+base_url = "https://site.example.com"
+ssh_host = "my-vm"
+remote_dir = "/var/www/site"
+ssh_timeout_seconds = 30
+```
+- 發布時會自動建立遠端目錄（`remote_dir/<期別>`、`remote_dir/assets`、`remote_dir/covers`）。
+- 採用 `rsync -a --chmod=D755,F644 --delete` 同步本期頁面與樣式。
+- 將封面圖寫入臨時檔案並以隨機雜湊名稱同步至遠端 `/covers/`。
+
+### 發布失敗自動備援機制
+
+若因 SSH 連線逾時、主機離線或網路不通導致發布失敗：
+- 終端機與日誌記錄：`私人網站發布失敗；改用單檔 HTML 報告。`
+- 傳送至 Telegram 的摘要訊息會**自動拿掉**「🔒 圖文完整版」連結。
+- 系統會**自動附送單檔離線 HTML 報告文件**（`report.html`）至私人聊天室，確保閱讀不中斷。
+
+### 私有 GitHub 儲存庫備份維運
+
+在 `config.toml` 中配置 `[backup]`：
+```toml
+[backup]
+enabled = true
+remote = "git@github.com:OWNER/econ-digest-output.git"
+branch = "main"
+author_name = "Your Name"
+author_email = "you@example.com"
+```
+- 每次建置後，系統自動將 `output/` 提交並 push 至遠端儲存庫。
+- **嚴格要求**：該 GitHub 儲存庫**絕對必須是 PRIVATE 私有儲存庫**，且絕不可指向公開程式碼儲存庫。
+- **失敗容錯**：備份作業若發生網路或驗證錯誤，系統僅記錄警告：`網站備份失敗（...）；導讀傳送繼續。`，主流程持續進行。
+
+---
+
+## Telegram 私人聊天室與頻道維運
+
+### 私人聊天室傳送流程
+
+1. **取得 Token 並寫入密鑰檔**：
+   ```sh
+   mkdir -p ~/.config/econ-digest
+   read -rsp 'Token: ' T && printf 'TELEGRAM_BOT_TOKEN=%s\n' "$T" > ~/.config/econ-digest/env && chmod 600 ~/.config/econ-digest/env && unset T; echo
+   ```
+2. **向機器人傳送 `/start`**。
+3. **綁定聊天室並發送測試訊息**：
+   ```sh
+   .venv/bin/econ-digest telegram-setup --test
+   ```
+
+### 頻道推播管理（`--channel`）
+
+若欲將導讀摘要同步推送至公開或私密頻道：
+1. 將機器人加入該頻道，並提升為**管理員**（Admin），勾選「**張貼訊息**」（Post Messages）權限。
+2. 執行設定指令綁定頻道：
+   ```sh
+   .venv/bin/econ-digest telegram-setup --channel @my_channel --test
+   ```
+   程式會向 Telegram API 驗證頻道類型與管理員權限，並將頻道 ID 儲存至 `~/.config/econ-digest/env` 中的 `TELEGRAM_CHANNEL_ID`。
+3. **推播特性**：
+   - 頻道接收核心摘要與 Instant View 連結，以及封面大圖預覽。
+   - **絕不包含**私人網站連結（「🔒 圖文完整版」）。
+   - **絕不傳送**任何報告文件或英文原文全文。
 
 ---
 
@@ -213,21 +332,20 @@ rm -f data/issues/te_2026.10.03/digest.json
 
 | 現象或錯誤代碼 | 常見原因 | 系統預設處理機制 | 建議處置方式 |
 | :--- | :--- | :--- | :--- |
-| **`User location is not supported`** | 模型 API 節點暫時性地理位置限制（2026-10-05 曾於部分節點短暫出現）。 | 分類為 `location` 錯誤，當前模型立即中斷，自動切換至下一備援模型（如 `claude-sonnet-4-6`）。 | 檢查網路出口或代理設定；多數情況由備援模型接手即可順暢完成，無須手動干預。 |
-| **`gwg exit 75` / `no free account`** | `gwg` 帳號池中所有可用帳號皆處於忙碌或暫時冷卻狀態。 | 分類為 `no_account`，以指數退避（30s、60s、120s…）自動等待至多 `no_account_wait_seconds`（預設 900 秒）。 | 若等待超時，執行 `gwg status` 檢查帳號池狀態，或登入新帳號以擴充集區。 |
-| **配額耗盡 (`RESOURCE_EXHAUSTED` / 429)** | 模型達到個人帳號之每日或每小時呼叫額度限制。 | 分類為 `quota`，當前模型立即中斷，自動容錯切換至備援模型。 | 執行 `gwg status` 與 `gwg usage` 查看用量；待配額重設後重新執行（已快取單元不重複扣額）。 |
-| **Telegram `can't parse entities`** | Telegram Bot API 拒絕 HTML 標籤格式（如標籤不對稱或不支援之語法）。 | 自動攔截錯誤並記錄警告，立即調用 `strip_tags()` 剝除 HTML 標籤改以純文字降級重送。 | 自動自我修復，訊息保證送達，維運人員無須處理。 |
-| **缺少 Token 或 Chat ID** | 密鑰檔未建立、權限不符或尚未與 Telegram 機器人完成配對。 | 程式拒絕發送並提示設定說明，或擲出 `ConfigError`。 | 透過安全的 `read -rsp` 指令建立 `~/.config/econ-digest/env`（權限 600），並執行 `telegram-setup --test`。 |
-| **Telegraph `FLOOD_WAIT_N`** | Telegraph API 觸發頻率限制（例如短時間內發送多個請求，回傳 `FLOOD_WAIT_7`）。 | 自動以正規表示式解析等待秒數，調用 `sleep` 暫停並自動重試（至多重試 5 次）。 | 系統自動退避重試，維運人員無須手動介入。 |
-| **缺少或無效的 Telegraph Token** | 密鑰檔未設定 `TELEGRAPH_ACCESS_TOKEN` 或該 Token 遭撤銷/無效。 | 在 `send` 時會嘗試自動呼叫 API 重新建立並寫入；若發生錯誤則中止。 | 執行 `.venv/bin/econ-digest telegraph-setup --force` 強制建立新帳號並更新密鑰。 |
-| **Telegraph 頁面超過容量上限** | 單篇內容加上導覽列超出 `page_limit_bytes` 上限（擲出 `ValueError`），或 API 回報內容超過 64 KB（64,000 位元組）。 | 發布前於本機檢驗節點大小，超限時立即中止，避免發布失敗或內容截斷。 | 在 `config.toml` 中調高 `[telegraph] page_limit_bytes`（上限為 64,000；預設 60,000），或調整該篇摘要深度。 |
-| **`--pages-only` 於 messages 模式失敗** | 設定檔為 `[telegram] delivery = "messages"` 時執行了 `send --pages-only`。 | 輸出 `--pages-only 僅適用於 Telegraph 模式；請將 telegram.delivery 設為 telegraph。` 並以結束代碼 2 退出。 | 確認 `[telegram] delivery = "telegraph"`；若在 messages 模式下需重新發送訊息，請使用 `--force`。 |
-| **封面圖說超出上限 (Caption > 1024)** | 摘要文字長度超過 Telegram 圖說上限（1024 個 UTF-16 單位）。 | 自動先精簡圖說（暫時省略與台灣相關焦點）；若仍超限，封面僅保留期別標題，並將完整摘要作為下一則獨立文字訊息發送。 | 系統全自動自我容錯降級，保證內容完整送達，維運人員無須干預。 |
-| **私人 HTML 報告體積較大（約 7–8 MB）** | HTML 報告預設以 Base64 Data URI 完整內嵌封面照片、文章題圖、圖表地圖、合併社論插圖（標註「社論插圖」）與本週漫畫。 | 內嵌於單一 HTML 檔案，離線可直接閱讀，Markdown 報告維持純文字。 | 若需關閉圖片內嵌，可設定 `[report] embed_images = false`；若不欲在 Telegram 附送報告檔案，可設定 `[telegram] send_report_file = false`。 |
-| **Telegraph 頁面維持純文字** | Telegraph 頁面為公開網址，基於版權與個人隱私保護，一律不放圖片與英文全文。 | 圖片與英文原文僅於 Telegram 私人聊天室與私人報告檔案流通。 | 正常保護機制，切勿手動將包含全文或插圖之頁面公開散播。 |
-| **新聞標籤無國旗設計** | 維持排版清晰與中立，各國新聞均不使用國旗 emoji。 | 摘要使用粗體「與台灣相關」與「•」清單，要聞使用文字標籤「【台灣相關】」，messages 模式使用「T1 · …」標記。 | 正常設計規範，全系統均不使用國旗 emoji。 |
-| **執行失敗 (Failed Run)** | 外部網路逾時、來源期別尚未釋出，或模型失敗率高於 30%。 | 每日每期至多發送一次 Telegram 失敗警報（避免洗版）；定時器於下個排程時段自動重試。 | 檢視 `data/logs/econ-digest.log` 查明失敗原因；排除外在問題後可隨時手動重新執行。 |
-| **執行鎖已被占用 (`AlreadyRunning`)** | 同一時間已有另一個 `econ-digest` 實例正在執行中。 | 取得非阻塞排他鎖（`fcntl.flock`）失敗時主動優雅退出（exit code 0），避免寫入衝突。 | 此為正常保護機制。若懷疑程序卡死，使用 `ps aux \| grep econ-digest` 確認，超時 3 小時系統會自動終止釋放。 |
+| **`User location is not supported`** | 模型 API 節點地理位置暫時性限制。 | 分類為 `location` 錯誤，立即切換至下一備援模型（如 `claude-sonnet-4-6`）。 | 檢查出站代理；通常由備援模型接手完成，無須干預。 |
+| **`gwg exit 75` / `no free account`** | 本機 `gwg` 帳號池暫無可用帳號。 | 分類為 `no_account`，指數退避等待至多 `no_account_wait_seconds`（預設 900 秒）。 | 執行 `gwg status` 檢查帳號狀態或登入新帳號。 |
+| **配額耗盡 (`RESOURCE_EXHAUSTED` / 429)** | 模型達到帳號呼叫額度限制。 | 分類為 `quota`，立即切換至備援模型。 | 待配額重設後重新執行，已快取單元不重複扣額。 |
+| **Telegram `can't parse entities`** | HTML 標籤格式不符合 Telegram 規範。 | 自動捕捉錯誤，立即調用 `strip_tags()` 剝除標籤改以純文字降級重送。 | 自動自我修復，訊息保證送達，無須介入。 |
+| **缺少 Token 或 Chat ID** | 密鑰檔未建立或尚未執行配對。 | 拒絕發送並提示設定說明。 | 透過 `telegram-setup --test` 完成綁定。 |
+| **Telegraph `FLOOD_WAIT_N`** | Telegraph API 觸發頻率限制。 | 解析等待秒數並自動 sleep 退避重試（最多 5 次）。 | 自動自我恢復，無須手動干預。 |
+| **缺少或無效的 Telegraph Token** | 未設定或 Token 遭伺服器撤銷。 | 自動嘗試重新註冊帳號並寫入密鑰檔。 | 執行 `telegraph-setup --force` 強制重新註冊。 |
+| **Telegraph 頁面超過容量上限** | 單篇內容加上導覽超過 60 KB 上限。 | 本地排版階段預先檢驗並中止，避免建立半殘頁面。 | 在 `config.toml` 中調高 `[telegraph] page_limit_bytes`（上限 64,000）或調整摘要深度。 |
+| **私人網站發布失敗 (SSH / rsync)** | SSH 逾時、未連上指定網路或目錄權限錯誤。 | 記錄警告，摘要訊息自動省略網站連結，自動改傳單檔 HTML 報告備援。 | 檢查 SSH 連線、`ssh_host` 與金鑰設定；單檔報告保證讀者取得內容。 |
+| **Telegram 內建瀏覽器無法登入網站** | Telegram 內建瀏覽器不支援 HTTP Basic Auth 彈窗。 | 屬於 Telegram 應用程式限制。 | 點擊瀏覽器選單選擇「在預設瀏覽器中開啟」（Safari / Chrome）即可正常輸入帳密。 |
+| **GitHub 備份 push 失敗** | Git 權限不符、儲存庫未建立或網路問題。 | 記錄警告（`網站備份失敗`），導讀主流程持續完成。 | 檢查 GitHub SSH 金鑰與儲存庫權限；確保備份儲存庫設定為 Private。 |
+| **英文選文或學習指南失敗** | 選文或指南模型呼叫逾時或格式錯誤。 | 記錄警告（`英文選文失敗`），導讀主流程持續完成。 | 檢查模型配額與網路；必要時加上 `--reanalyze` 重新執行。 |
+| **`--pages-only` 於 messages 模式失敗** | 設定檔為 `delivery = "messages"` 時執行了 `--pages-only`。 | 輸出提示並以 exit code 2 退出。 | 確認 `delivery = "telegraph"`；若在 messages 模式下需重送請用 `--force`。 |
+| **執行鎖已被占用 (`AlreadyRunning`)** | 同一時間已有另一個實例正在運行。 | 捕捉非阻塞檔案鎖失敗並安全退出（exit code 0）。 | 正常保護機制；若程序卡死，使用 `ps aux \| grep econ-digest` 確認。 |
 
 ---
 
@@ -235,235 +353,160 @@ rm -f data/issues/te_2026.10.03/digest.json
 
 ### 1. gwg: User location is not supported
 
-- **詳細成因**：
-  在呼叫 Google Gemini 等模型節點時，偶爾會因端點伺服器判定來源 IP 地理位置不在允許區域內，回傳類似以下錯誤：
-  ```
-  FAILED_PRECONDITION: User location is not supported for the API use.
-  ```
-  此現象在 2026-10-05 曾在特定 API 節點被觀察到，通常為短暫的路由或判定異常。
-- **系統內部行為**：
-  LLM 客戶端的 `classify_error()` 函式會精確捕捉 `location` 錯誤，當前模型單元不會盲目進行無謂的重試，而是立即放棄當前模型，無縫切換到設定檔 `[llm.models]` 中定義的下一款備援模型（預設為 `claude-sonnet-4-6`）重新發起分析。
-- **維運處置**：
-  1. 通常無須採取任何手動措施，管線會在備援模型協助下自動完成本期導讀。
-  2. 若想確保主要模型正常，可檢查主機出站網路是否掛載了特定地區的 VPN / Proxy，並執行 `gwg status` 確認帳號區域連線狀態。
+- **詳細成因**：模型 API 端點伺服器判定來源 IP 所在地理區域不支援。
+- **系統處理機制**：LLM 客戶端捕捉 `location` 錯誤，當前模型立即中斷，無縫切換到 `[llm.models]` 中定義的備援模型（如 `claude-sonnet-4-6`）。
+- **處置建議**：通常無須手動干預；若欲排查主要模型，檢查主機網路與代理設定。
 
 ---
 
 ### 2. gwg exit 75 / no free account
 
-- **詳細成因**：
-  當本機安裝之 `gwg` 模型池正在處理其他平行作業，或是帳號池中的免費用戶達到短暫速率上限時，`gwg` 子程序會以結束代碼 `75` 退出。
-- **系統內部行為**：
-  系統識別為 `no_account` 狀態，自動進入指數退避等待循環（初始等待 30 秒，隨後 60 秒、120 秒遞增），最高在 `no_account_wait_seconds`（預設 900 秒 / 15 分鐘）的等待預算內持續監控並等待釋出帳號。
-- **維運處置**：
-  1. 若偶爾出現，等待數分鐘即可自動恢復。
-  2. 若等待預算用盡導致流程終止，請執行下列指令確認本機帳號池狀態：
-     ```sh
-     gwg status
-     ```
-  3. 若帳號已失效，請依 `gwg` 規範重新登入或補充分流帳號。
+- **詳細成因**：本機 `gwg` 帳號池中的免費用戶達到短暫冷卻上限，子程序以結束代碼 `75` 退出。
+- **系統處理機制**：系統以指數退避（30 秒、60 秒、120 秒…）在 `no_account_wait_seconds`（預設 900 秒）內持續等待釋出帳號。
+- **處置建議**：若等待超時，執行 `gwg status` 檢查帳號狀態。
 
 ---
 
 ### 3. 模型配額耗盡 (Quota Exhaustion)
 
-- **詳細成因**：
-  單一帳號在短時間內發起大量分析請求，收到模型 API 回報 `RESOURCE_EXHAUSTED`、HTTP 429 或 `Individual quota reached`。
-- **系統內部行為**：
-  `econ-digest` 會將其標記為 `quota` 錯誤，停止當前模型的重試嘗試，立即容錯降級轉移至備援模型繼續處理剩餘的分析批次。
-- **維運處置**：
-  1. 檢視配額用量：
-     ```sh
-     gwg usage
-     ```
-  2. 若全部模型配額皆耗盡，無須擔心資料毀損。只要等到配額重置窗口過後（或隔日），重新執行：
-     ```sh
-     .venv/bin/econ-digest run
-     ```
-  3. 由於系統具備**單元級落盤快取（Per-unit caching）**，先前已成功產出並快取的單元絕不會重複呼叫模型，僅會針對未完成的單元發起請求，極大化節省配額。
+- **詳細成因**：帳號在短時間內達到呼叫額度限制（HTTP 429）。
+- **系統處理機制**：標記為 `quota` 錯誤，立即轉移至備援模型繼續處理剩餘批次。
+- **處置建議**：待配額重設後重新執行，單元級快取保證已完成部分不重複扣額。
 
 ---
 
 ### 4. Telegram: can't parse entities
 
-- **詳細成因**：
-  Telegram 對訊息內的 HTML 格式有嚴格限制（如標籤未閉合、字元實體錯誤或不合法的巢狀結構）。若直接發送不符合規格的 HTML，Telegram Bot API 會回傳 HTTP 400：
-  ```
-  Bad Request: can't parse entities: ...
-  ```
-- **系統內部行為**：
-  `src/econ_digest/telegram/client.py` 封裝了 `send_message_safe()` 防禦函式：
-  ```python
-  try:
-      return self.send_message(chat_id, html, **kw)
-  except TelegramError as error:
-      if error.status != 400 or "can't parse entities" not in error.description.lower():
-          raise
-  _LOGGER.warning("Telegram rejected HTML entities; retrying the message as plain text")
-  return self.send_message(chat_id, strip_tags(html), ...)
-  ```
-  一旦遇到實體解析失敗，客戶端會自動以正則表達式剝除所有 HTML 標籤，立即降級為純文字重新發送。
-- **維運處置**：
-  - 此設計確保 Telegram 推播具備 100% 送達韌性，維運人員無須手動介入處理。
+- **詳細成因**：Telegram 拒絕不合規的 HTML 標籤結構（HTTP 400）。
+- **系統處理機制**：`send_message_safe()` 自動攔截錯誤並記錄警告，立即調用 `strip_tags()` 剝除標籤改以純文字降級重送。
+- **處置建議**：系統保證 100% 送達，無須維運處置。
 
 ---
 
-### 5. 缺少 Token 或 Chat ID
+### 5. 缺少 Token、Chat ID 或 Channel ID
 
-- **詳細成因**：
-  初次部署或設定檔搬移時，未在環境變數或 `~/.config/econ-digest/env` 填入正確之機器人 Token 或私人聊天室 ID。
-- **維運處置步驟**：
-  1. **建立並儲存 Token**（確保不留存在歷史紀錄中）：
-     ```sh
-     mkdir -p ~/.config/econ-digest
-     read -rsp 'Token: ' T && printf 'TELEGRAM_BOT_TOKEN=%s\n' "$T" > ~/.config/econ-digest/env && chmod 600 ~/.config/econ-digest/env && unset T; echo
-     ```
-  2. **啟動機器人**：
-     開啟 Telegram，找到您的機器人並按下 `/start`。
-  3. **自動繫結聊天室並驗證**：
-     ```sh
-     .venv/bin/econ-digest telegram-setup --test
-     ```
-     程式會自動解析收到的 `/start` 訊息，將 `TELEGRAM_CHAT_ID` 寫入密鑰檔，並向您的聊天室發送測試成功訊息。
+- **處置步驟**：
+  1. 建立 `~/.config/econ-digest/env` 寫入 `TELEGRAM_BOT_TOKEN`（權限 600）。
+  2. 綁定私人聊天室：發送 `/start` 後執行 `.venv/bin/econ-digest telegram-setup --test`。
+  3. 綁定頻道（選填）：機器人設為頻道管理員後執行 `.venv/bin/econ-digest telegram-setup --channel @my_channel --test`。
 
 ---
 
 ### 6. 執行失敗與重試機制 (Failed Run)
 
-- **詳細成因**：
-  外部連線中斷（GitHub 無法存取）、當期電子書尚未發布，或模型分析失敗率超過容許門檻（30%）。
-- **系統內部行為**：
-  1. **失敗警報推送**：系統會向 Telegram 私人聊天室發送警報：
-     `⚠️ 本週經濟學人導讀產生失敗（{error_type}），稍後會自動重試。`
-  2. **單日防洗版保護**：
-     為避免定時器頻繁重試導致手機收到過多干擾訊息，系統在 `state.json` 的 `error_notices` 中記錄發送日期（以 `Asia/Taipei` 日期為準）。同一期別在同一曆日內**最多只會發送一次**失敗通報。
-  3. **定時器自動重試**：
-     若逢週末，systemd 定時器會在預設的五個時段（週六 07:00、13:00、19:00 及週日 09:00、20:00）依序自動再次執行，自動拾取未完成之進度。
-- **維運處置**：
-  - 可先透過日誌確認失敗類型。若是外部來源尚未更新，定時器會在稍後時段自動抓取，無須手動處置。
-  - 若已手動修復問題，可隨時手動執行 `.venv/bin/econ-digest run` 重新發起作業。
+- **系統處理機制**：
+  1. 失敗時向 Telegram 私人聊天室發送警報：`⚠️ 本週經濟學人導讀產生失敗（{error_type}），稍後會自動重試。`
+  2. **單日防洗版保護**：同一期別在同一曆日內最多僅發送一次失敗警報。
+  3. 定時器於下個排程時段自動重試。
 
 ---
 
 ### 7. 執行鎖衝突 (Lock already held)
 
-- **詳細成因**：
-  當定時器排程已觸發背景工作，維運人員又同時在命令列手動執行 `econ-digest run`，或是前次任務仍在進行中。
-- **系統內部行為**：
-  系統在 `data/.lock` 上採用 Unix 標準的 `fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)` 非阻塞排他鎖：
-  ```python
-  with run_lock(config.paths.data_dir):
-      ...
-  ```
-  後進的程序若無法立即取得鎖，會捕捉 `AlreadyRunning` 例外並印出：
-  `已有 econ-digest 程序正在執行，本次略過。`
-  程式會安全退出（回傳值 0），保證絕對不會發生兩組程序同時寫入同一份報告或重複向 Telegram 發送訊息的競態問題。
-- **維運處置**：
-  1. `fcntl.flock` 屬於作業系統核心層級的行程鎖。若正在運行的程序異常崩潰或被強制終止（kill），作業系統會**自動釋放**該檔案鎖，無須手動刪除 `.lock` 檔案。
-  2. 若懷疑有程序長時間停滯，可確認其運行狀態：
-     ```sh
-     ps aux | grep econ-digest
-     ```
-  3. 注意：systemd service 單元已配置 `TimeoutStartSec=3h`，任何持續執行超過 3 小時的失控程序均會被 systemd 自動強制終止，確保系統在下一排程時段可順暢接軌。
+- **詳細成因**：排程背景工作正在進行時，手動重複啟動程序。
+- **系統處理機制**：系統在 `data/.lock` 上調用非阻塞排他鎖，取得鎖失敗時捕捉 `AlreadyRunning` 並優雅退出（exit code 0）。
+- **處置建議**：若程序卡死，使用 `ps aux | grep econ-digest` 查看，超過 3 小時會由 systemd 強制終止。
 
 ---
 
 ### 8. Telegraph: FLOOD_WAIT_N
 
-- **詳細成因**：
-  在發布或原地編輯多個 Telegraph 分頁時，若短時間內頻繁向 Telegraph API 發起 HTTP 請求，或與其他服務共用同一網路出口，Telegraph API 端點會觸發速率限制保護，回傳如下格式之錯誤代碼：
-  ```
-  FLOOD_WAIT_N
-  ```
-  其中 `N` 為整數，代表 Telegraph 伺服器要求發送端需冷卻等待的秒數（例如 `FLOOD_WAIT_5` 代表需等待 5 秒）。
-- **系統內部行為**：
-  `src/econ_digest/telegraph/client.py` 封裝了安全的重試機制：
-  ```python
-  flood = re.fullmatch(r"FLOOD_WAIT_(\d+)", error_code)
-  if flood and attempt < 5:
-      self._sleep(int(flood[1]))
-      continue
-  ```
-  當捕獲 `FLOOD_WAIT_N` 時，客戶端會使用正規表示式精確解析等待秒數，並自動暫停等待（sleep）該秒數後自動發起重試（最多允許重試 5 次）。
-- **維運處置**：
-  此為系統全自動自我恢復機制，維運人員無須手動干預，程式會在冷卻後自動繼續完成分頁發布與編輯。
+- **詳細成因**：短時間內頻繁發起 Telegraph API 請求觸發頻率限制。
+- **系統處理機制**：客戶端自動解析等待秒數並 sleep 退避重試（最多 5 次）。
+- **處置建議**：自動自我修復，無須介入。
 
 ---
 
 ### 9. 缺少或無效的 Telegraph Access Token
 
-- **詳細成因**：
-  1. 初次部署時尚未執行 `telegraph-setup` 建立帳號，且尚未由 `send` 自動產生。
-  2. 既有的 `TELEGRAPH_ACCESS_TOKEN` 因人為誤改、檔案毀損或遭到 Telegraph 伺服器端撤銷失效，導致 API 回傳 `Telegraph 帳號缺少存取密鑰` 或存取權限錯誤。
-- **系統內部行為**：
-  - 在執行 `send` 或完整管線流程時，`src/econ_digest/commands/send.py` 會自動調用 `ensure_account()`：若密鑰檔中完全缺少 `TELEGRAPH_ACCESS_TOKEN`，系統會自動向 Telegraph API 申請建立專屬帳號，並將取得的 Token 自動以權限 `600` 寫入 `~/.config/econ-digest/env`。
-  - 但若密鑰檔中已存在 Token，而該 Token 實際上已無效，Telegraph API 在呼叫 `createPage` 或 `editPage` 時會拒絕請求。
-- **維運處置**：
-  若遇到 Token 無效或欲更換全新 Telegraph 帳號，請執行：
-  ```sh
-  .venv/bin/econ-digest telegraph-setup --force
-  ```
-  `--force` 旗標會強制向 Telegraph API 重新註冊帳號，並以原子方式覆蓋更新 `~/.config/econ-digest/env` 內的 `TELEGRAPH_ACCESS_TOKEN`。
+- **處置建議**：執行 `.venv/bin/econ-digest telegraph-setup --force` 強制重新註冊專屬帳號並覆蓋密鑰檔。
 
 ---
 
 ### 10. Telegraph 頁面超出容量上限 (Page Size Limit)
 
-- **詳細成因**：
-  1. Telegraph 官方 API 規範單一頁面內容的 JSON 結構以 UTF-8 編碼後，其大小不可超過 **64 KB（64,000 位元組）**。若超過此限制，Telegraph API 會拒絕請求。
-  2. 系統在本地排版時，預設每頁上限為 `page_limit_bytes = 60000`（預留 4,000 位元組供全頁導覽列與換頁按鈕使用）。若某一章節包含極長的文章摘要，導致該「單篇文章」本體加上導覽列後便已超過單頁可用預算，程式為維護文章結構完整性（不隨意腰斬文章或漏失引述欄位），會主動拋出例外：
-     ```
-     ValueError: <組別>的單篇內容加上導覽超過頁面上限；請提高 telegraph.page_limit_bytes
-     ```
-- **系統內部行為**：
-  - `src/econ_digest/render/telegraph.py` 的 `render_telegraph()` 會在對外發起任何 API 呼叫前，預先精算所有文章節點與導覽列之 UTF-8 JSON 位元組數。若文章過長，會在分配公開頁面網址前立即中止，絕不在公共空間建立空頁或半殘內容。
-  - `src/econ_digest/telegraph/publish.py` 也會在發布與原地編輯前再度執行嚴格節點結構與容量校驗。
-- **維運處置**：
-  1. **調高設定檔中的單頁上限**：
-     開啟 `config.toml`，在 `[telegraph]` 區段將 `page_limit_bytes` 適度調高（最高可設為 64,000）：
-     ```toml
-     [telegraph]
-     page_limit_bytes = 63000
-     ```
-  2. **調整文章摘要深度**：
-     若調高至 63,000 ~ 64,000 仍超出上限，代表該篇內容異常龐大。可透過 `config.toml` 的 `[tiers]` 調整該文體或領域之摘要等級（例如由 Tier A 深度解析調整為 Tier B 詳細摘要），並重新執行：
-     ```sh
-     .venv/bin/econ-digest analyze --issue <期別> --reanalyze
-     .venv/bin/econ-digest send --issue <期別> --force
-     ```
+- **詳細成因**：單篇內容加上導覽列超出 `page_limit_bytes`（上限 64,000 位元組）。
+- **處置建議**：
+  1. 開啟 `config.toml` 調高 `[telegraph] page_limit_bytes = 63000`。
+  2. 或在 `[tiers]` 調低該文體摘要深度後重新執行。
 
 ---
 
-### 11. Telegraph 頁面維護與模式限制 (`send --pages-only`)
+### 11. 原地維護機制與模式限制 (`send --pages-only`)
 
-- **詳細成因與設計目的**：
-  在維運期間，若修改了提示詞、正體字對照表（`glossary.tsv`）或微調了報告文字，通常希望將更新後的內容同步至已發布的 Telegraph 導讀頁面，讓讀者點開 Telegram 既有的 Instant View 連結時能呈現最新修正。然而，此時維運人員**往往不希望**再次向 Telegram 私人聊天室發送整套訊息，避免打擾手機端讀者，亦不希望更動已記錄的傳送進度與狀態。
+- **功能特色**：
+  - 重建本地多頁網站（`output/`）。
+  - 發布更新至遠端 Web 伺服器（若 `[site] enabled = true`）。
+  - 原地編輯已發布之 Telegraph 頁面（網址維持不變）。
+  - 提交並 push 備份至私有 GitHub 儲存庫。
+  - **完全不發送 Telegram 訊息**，不修改已發送狀態。
+- **模式限制**：僅適用於 Telegraph 傳送模式（`delivery = "telegraph"`）。
+
+---
+
+### 12. 私人網站發布與 SSH / rsync 失敗排查
+
+- **詳細成因**：
+  1. SSH 金鑰未配置免密碼登入或逾時（`ssh_timeout_seconds`）。
+  2. 伺服器端目錄（`remote_dir`）權限不足，rsync 無法寫入。
+  3. 當前設備處於外部未受信任網路，無法連線至內網主機。
 - **系統內部行為**：
-  - `src/econ_digest/commands/send.py` 檢查當前傳送模式：
-    ```python
-    telegraph = config.telegram.delivery == "telegraph"
-    if pages_only and not telegraph:
-        log("--pages-only 僅適用於 Telegraph 模式；請將 telegram.delivery 設為 telegraph。")
-        return 2
-    ```
-    若在 `delivery = "messages"` 模式下使用 `--pages-only`，程式會輸出提示並以 exit code 2 拒絕執行。
-  - 在 Telegraph 模式下，系統會讀取 `data/issues/te_<期別>/telegraph_pages.json`，對既有的 Telegraph 頁面調用 `publish_pages()` 進行**原地編輯（EDIT）**更新內容。網址維持完全相同，不再使用的多餘頁面會標註「此頁已不再使用」。
-  - 處理完成後直接以 exit code 0 退出，**完全不觸碰** `telegram_progress.json` 的傳送進度，亦不修改 `state.json` 的已傳送紀錄（`delivered`），更不會發送任何 Telegram 聊天訊息。
-  - 支援與 `--dry-run` 結合使用（`send --pages-only --dry-run`），離線列印各分頁標題與 UTF-8 位元組大小，不發起任何對外連線。
+  - `publish_site()` 捕捉 `subprocess.SubprocessError` 或 `OSError`，記錄警告：`私人網站發布失敗；改用單檔 HTML 報告。`
+  - 傳送訊息時 `site_url` 設為 `None`，摘要訊息自動拿掉「🔒 圖文完整版」連結。
+  - 自動啟用備援機制，將單檔完整 HTML 報告（`report.html`）作為附件檔案發送至 Telegram 私人聊天室。
 - **維運處置**：
-  1. **離線預覽分頁大小**：
+  1. 測試手動連線：
      ```sh
-     .venv/bin/econ-digest send --pages-only --dry-run
+     ssh -o BatchMode=yes my-vm "mkdir -p /var/www/site"
      ```
-  2. **原地發布更新**：
+  2. 確認遠端目錄擁有者與權限（建議設為 Web 伺服器使用者或目前登入使用者）。
+  3. 若網路環境暫時無法連線至 Web 伺服器，系統的單檔報告備援機制可確保閱讀體驗不受影響。
+
+---
+
+### 13. Telegram 內建瀏覽器無法處理 Basic Auth 彈窗問題
+
+- **現象描述**：讀者在 Telegram 手機端點擊「🔒 圖文完整版」連結時，Telegram 內建之 In-App Browser 偶爾無法正確彈出 HTTP Basic Auth 帳號密碼對話框，或登入後反覆跳轉 401 錯誤。
+- **成因解析**：部分平台的 Telegram 內建瀏覽器 WebKit 核心對 HTTP 401 Challenge 支援度不一致，可能阻斷基本身分驗證對話框。
+- **解決方式**：
+  - **在系統瀏覽器中開啟**：點擊右上角選單（三點圖示或分享圖示），選擇「**在瀏覽器中開啟**」（如 Safari、Chrome 或 Firefox）。
+  - 系統瀏覽器具備完整的 HTTP Basic Auth 支援與密碼自動填入（Keychain / Google 密碼管理員），輸入一次後即可長期免密碼閱讀。
+
+---
+
+### 14. 網站備份 push 失敗排查
+
+- **現象描述**：日誌中出現警告：`網站備份失敗（SubprocessError）；導讀傳送繼續。`
+- **成因解析**：
+  1. Git 無法透過 SSH 連線至 GitHub（缺少 SSH 金鑰或 `ssh-agent` 未啟動）。
+  2. 遠端儲存庫不存在、URL 錯誤或使用者無推送權限。
+- **處置步驟**：
+  1. 檢查 `output/` 內的獨立 Git 狀態：
      ```sh
-     .venv/bin/econ-digest send --pages-only
+     git -C output remote -v
+     git -C output status
      ```
-     或指定期別：
+  2. 測試 GitHub SSH 驗證：
      ```sh
-     .venv/bin/econ-digest send --issue 2026.10.03 --pages-only
+     ssh -T git@github.com
      ```
-  3. 若欲重新推送整套內容至 Telegram 私人聊天室（包含重新發送封面照片、私訊與報告檔案），請改用：
-     ```sh
-     .venv/bin/econ-digest send --issue 2026.10.03 --force
-     ```
+  3. **確認儲存庫屬性**：至 GitHub 確認該備份儲存庫（如 `OWNER/econ-digest-output`）屬性設定為 **Private**，嚴禁設定為 Public。
+
+---
+
+### 15. 英文學習選文或指南失敗與容錯機制
+
+- **現象描述**：日誌中出現警告：`英文選文失敗（quota），本期未提供學習指南。` 或 `英文學習指南失敗（timeout），本期未提供學習指南。`
+- **成因解析**：
+  1. 當期無符合字數範圍（600–1,300 字）之候選文章。
+  2. 英文選文或指南生成單元發生模型額度耗盡或逾時。
+- **系統內部行為**：
+  - 英文學習單元採獨立錯誤捕捉設計。若選文或指南製作失敗，系統將 `digest.english` 設為 `None`，並在日誌記錄警告。
+  - 整期導讀的其他分析、要聞速覽、台灣專區、網站建置與 Telegram 發送**完全不受影響**，管線不會崩潰中斷。
+- **維運處置**：
+  - 若為偶發配額問題，待配額重設後執行：
+    ```sh
+    .venv/bin/econ-digest analyze --issue <期別> --reanalyze
+    .venv/bin/econ-digest send --issue <期別> --pages-only
+    ```
+    即可重新嘗試評選與製作學習指南，並原地更新至 Telegraph 頁面與私人網站。
