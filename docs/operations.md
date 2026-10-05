@@ -11,6 +11,7 @@
   - [檢查定時器與服務狀態](#檢查定時器與服務狀態)
   - [手動觸發與重新發送](#手動觸發與重新發送)
   - [重設單期快取](#重設單期快取)
+  - [更新詞彙對照表後重建報告](#更新詞彙對照表後重建報告)
 - [問題排查速查表](#問題排查速查表)
 - [常見問題深度排查](#常見問題深度排查)
   - [1. gwg: User location is not supported](#1-gwg-user-location-is-not-supported)
@@ -132,6 +133,27 @@ rm -f data/issues/te_2026.10.03/digest.json
 ```
 > [!TIP]
 > 手動刪除時請保留 `TheEconomist.2026.10.03.epub` 與 `issue.json`，如此系統在重新分析時無須重新自 GitHub 下載或重新剖析電子書結構。
+
+---
+
+### 更新詞彙對照表後重建報告
+
+系統的單元級快取（版本 2）儲存的是通過結構驗證、但**尚未執行台灣正體在地化（zh-TW normalisation）**的原始輸出；正體化轉換與詞彙替換是在組裝完整導讀資料（`digest.json`）時才執行。
+
+若維運期間編輯或擴充了 `src/econ_digest/zhtw/glossary.tsv` 中的在地化慣用語對照表，**不需要**清除快取或重新呼叫模型，可直接依序執行下列指令重建報告：
+
+```sh
+# 1. 重新組裝導讀（所有單元直接從快取讀取，不消耗模型配額，重新套用最新 glossary.tsv）
+.venv/bin/econ-digest analyze --issue 2026.10.03
+
+# 2. 重新渲染 Markdown、HTML 報告與 Telegram 訊息切塊
+.venv/bin/econ-digest render --issue 2026.10.03
+```
+
+若欲將更新後的內容重新推送到 Telegram，可接續執行：
+```sh
+.venv/bin/econ-digest send --issue 2026.10.03 --force
+```
 
 ---
 
