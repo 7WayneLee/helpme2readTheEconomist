@@ -21,6 +21,9 @@
   - [5. 缺少 Token 或 Chat ID](#5-缺少-token-或-chat-id)
   - [6. 執行失敗與重試機制 (Failed Run)](#6-執行失敗與重試機制-failed-run)
   - [7. 執行鎖衝突 (Lock already held)](#7-執行鎖衝突-lock-already-held)
+  - [8. Telegraph: FLOOD_WAIT_N](#8-telegraph-flood_wait_n)
+  - [9. 缺少或無效的 Telegraph Access Token](#9-缺少或無效的-telegraph-access-token)
+  - [10. Telegraph 頁面超出容量上限 (Page Size Limit)](#10-telegraph-頁面超出容量上限-page-size-limit)
 
 ---
 
@@ -33,7 +36,7 @@
 #### 1. 應用程式檔案日誌
 - **預設路徑**：`data/logs/econ-digest.log`
 - **輪替機制**：單一檔案大小上限為 2 MB，自動保留最近 3 份歷史輪替檔案（`econ-digest.log.1`、`.2`、`.3`）。
-- **隱私安全**：所有敏感憑證（包括 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`、`GITHUB_TOKEN` 以及 Telegram API URL 中的 Bot Token）在寫入日誌時均會自動遮蔽為 `[已隱藏]`。
+- **隱私安全**：所有敏感憑證（包括 `TELEGRAM_BOT_TOKEN`、`TELEGRAM_CHAT_ID`、`GITHUB_TOKEN`、`TELEGRAPH_ACCESS_TOKEN` 以及 Telegram API URL 中的 Bot Token）在寫入日誌時均會自動遮蔽為 `[已隱藏]`。
 - **即時檢視指令**：
   ```sh
   # 持續監控最新日誌輸出
@@ -94,13 +97,13 @@ systemctl --user start econ-digest.service
 ```
 
 #### 接續中斷的傳送（斷點續傳）
-若推送至 Telegram 期間網路斷線或發生暫時性錯誤，直接再次執行 `send` 指令即可：
+若在發布 Telegraph 頁面或推送至 Telegram 期間網路斷線或發生暫時性錯誤，直接再次執行 `send` 指令即可：
 ```sh
 .venv/bin/econ-digest send
 ```
-系統會自動讀取 `data/issues/te_<期別>/telegram_progress.json` 中的進度指標（`next_message`），自動跳過已發送之訊息與附件，接續傳送剩餘內容。
+系統會自動讀取 `data/issues/te_<期別>/telegram_progress.json` 中的進度指標（包含 `pages_published` 頁面發布狀態與 `next_message` 訊息傳送索引），自動跳過已發布之頁面與已發送之訊息，接續傳送剩餘內容。
 
-#### 重新發送已完成期別
+#### 重新發送已完成期別（原地編輯與強制重送）
 若某期先前已發送完畢（已記錄於 `state.json` 的 `delivered` 中），系統預設會略過以避免干擾。若需強制重新發送全部內容：
 ```sh
 # 重新發送最新一期
@@ -109,6 +112,15 @@ systemctl --user start econ-digest.service
 # 或重新發送特定期別
 .venv/bin/econ-digest send --issue 2026.10.03 --force
 ```
+- **Telegraph 原地編輯（In-Place Edit）**：在預設的 Telegraph 模式下，`--force` 不會重複產生新的公開網址，而是讀取 `data/issues/te_<期別>/telegraph_pages.json`，對既有的 Telegraph 頁面進行**原地編輯（EDIT）**更新內容。網址維持完全相同，先前已推送至 Telegram 聊天室的 Instant View 預覽與連結均持續有效；若因調整摘要深度使分頁數量減少，多餘的舊頁面會自動被編輯為標題「此頁已不再使用」（並提供回當期第一頁之超連結）。
+- **Messages 模式行為**：若設定檔中為 `[telegram] delivery = "messages"`，則 `--force` 會自第一則起重新發送全部切分訊息。
+
+#### 離線預覽檢視（Dry-run）
+若欲在不對外建立 Telegraph 頁面且不向 Telegram 發送任何訊息的情況下，檢查頁面排版與大小，可加上 `--dry-run` 旗標：
+```sh
+.venv/bin/econ-digest send --dry-run
+```
+終端機會列印出所有分頁標題、以預覽網址計算的 UTF-8 JSON 位元組大小（驗證是否低於 `page_limit_bytes`），以及即將發送至 Telegram 的摘要訊息與英文選文私訊摺疊區塊。
 
 ---
 
@@ -166,6 +178,9 @@ rm -f data/issues/te_2026.10.03/digest.json
 | **配額耗盡 (`RESOURCE_EXHAUSTED` / 429)** | 模型達到個人帳號之每日或每小時呼叫額度限制。 | 分類為 `quota`，當前模型立即中斷，自動容錯切換至備援模型。 | 執行 `gwg status` 與 `gwg usage` 查看用量；待配額重設後重新執行（已快取單元不重複扣額）。 |
 | **Telegram `can't parse entities`** | Telegram Bot API 拒絕 HTML 標籤格式（如標籤不對稱或不支援之語法）。 | 自動攔截錯誤並記錄警告，立即調用 `strip_tags()` 剝除 HTML 標籤改以純文字降級重送。 | 自動自我修復，訊息保證送達，維運人員無須處理。 |
 | **缺少 Token 或 Chat ID** | 密鑰檔未建立、權限不符或尚未與 Telegram 機器人完成配對。 | 程式拒絕發送並提示設定說明，或擲出 `ConfigError`。 | 透過安全的 `read -rsp` 指令建立 `~/.config/econ-digest/env`（權限 600），並執行 `telegram-setup --test`。 |
+| **Telegraph `FLOOD_WAIT_N`** | Telegraph API 觸發頻率限制（例如短時間內發送多個請求，回傳 `FLOOD_WAIT_7`）。 | 自動以正規表示式解析等待秒數，調用 `sleep` 暫停並自動重試（至多重試 5 次）。 | 系統自動退避重試，維運人員無須手動介入。 |
+| **缺少或無效的 Telegraph Token** | 密鑰檔未設定 `TELEGRAPH_ACCESS_TOKEN` 或該 Token 遭撤銷/無效。 | 在 `send` 時會嘗試自動呼叫 API 重新建立並寫入；若發生錯誤則中止。 | 執行 `.venv/bin/econ-digest telegraph-setup --force` 強制建立新帳號並更新密鑰。 |
+| **Telegraph 頁面超過容量上限** | 單篇內容加上導覽列超出 `page_limit_bytes` 上限（擲出 `ValueError`），或 API 回報內容超過 64,000 位元組。 | 發布前於本機檢驗節點大小，超限時立即中止，避免發布失敗或內容截斷。 | 在 `config.toml` 中調高 `[telegraph] page_limit_bytes`（上限為 64,000；預設 60,000），或調整該篇摘要深度。 |
 | **執行失敗 (Failed Run)** | 外部網路逾時、來源期別尚未釋出，或模型失敗率高於 30%。 | 每日每期至多發送一次 Telegram 失敗警報（避免洗版）；定時器於下個排程時段自動重試。 | 檢視 `data/logs/econ-digest.log` 查明失敗原因；排除外在問題後可隨時手動重新執行。 |
 | **執行鎖已被占用 (`AlreadyRunning`)** | 同一時間已有另一個 `econ-digest` 實例正在執行中。 | 取得非阻塞排他鎖（`fcntl.flock`）失敗時主動優雅退出（exit code 0），避免寫入衝突。 | 此為正常保護機制。若懷疑程序卡死，使用 `ps aux \| grep econ-digest` 確認，超時 3 小時系統會自動終止釋放。 |
 
@@ -305,3 +320,69 @@ rm -f data/issues/te_2026.10.03/digest.json
      ps aux | grep econ-digest
      ```
   3. 注意：systemd service 單元已配置 `TimeoutStartSec=3h`，任何持續執行超過 3 小時的失控程序均會被 systemd 自動強制終止，確保系統在下一排程時段可順暢接軌。
+
+---
+
+### 8. Telegraph: FLOOD_WAIT_N
+
+- **詳細成因**：
+  在發布或原地編輯多個 Telegraph 分頁時，若短時間內頻繁向 Telegraph API 發起 HTTP 請求，或與其他服務共用同一網路出口，Telegraph API 端點會觸發速率限制保護，回傳如下格式之錯誤代碼：
+  ```
+  FLOOD_WAIT_N
+  ```
+  其中 `N` 為整數，代表 Telegraph 伺服器要求發送端需冷卻等待的秒數（例如 `FLOOD_WAIT_5` 代表需等待 5 秒）。
+- **系統內部行為**：
+  `src/econ_digest/telegraph/client.py` 封裝了安全的重試機制：
+  ```python
+  flood = re.fullmatch(r"FLOOD_WAIT_(\d+)", error_code)
+  if flood and attempt < 5:
+      self._sleep(int(flood[1]))
+      continue
+  ```
+  當捕獲 `FLOOD_WAIT_N` 時，客戶端會使用正規表示式精確解析等待秒數，並自動暫停等待（sleep）該秒數後自動發起重試（最多允許重試 5 次）。
+- **維運處置**：
+  此為系統全自動自我恢復機制，維運人員無須手動干預，程式會在冷卻後自動繼續完成分頁發布與編輯。
+
+---
+
+### 9. 缺少或無效的 Telegraph Access Token
+
+- **詳細成因**：
+  1. 初次部署時尚未執行 `telegraph-setup` 建立帳號，且尚未由 `send` 自動產生。
+  2. 既有的 `TELEGRAPH_ACCESS_TOKEN` 因人為誤改、檔案毀損或遭到 Telegraph 伺服器端撤銷失效，導致 API 回傳 `Telegraph 帳號缺少存取密鑰` 或存取權限錯誤。
+- **系統內部行為**：
+  - 在執行 `send` 或完整管線流程時，`src/econ_digest/commands/send.py` 會自動調用 `ensure_account()`：若密鑰檔中完全缺少 `TELEGRAPH_ACCESS_TOKEN`，系統會自動向 Telegraph API 申請建立專屬帳號，並將取得的 Token 自動以權限 `600` 寫入 `~/.config/econ-digest/env`。
+  - 但若密鑰檔中已存在 Token，而該 Token 實際上已無效，Telegraph API 在呼叫 `createPage` 或 `editPage` 時會拒絕請求。
+- **維運處置**：
+  若遇到 Token 無效或欲更換全新 Telegraph 帳號，請執行：
+  ```sh
+  .venv/bin/econ-digest telegraph-setup --force
+  ```
+  `--force` 旗標會強制向 Telegraph API 重新註冊帳號，並以原子方式覆蓋更新 `~/.config/econ-digest/env` 內的 `TELEGRAPH_ACCESS_TOKEN`。
+
+---
+
+### 10. Telegraph 頁面超出容量上限 (Page Size Limit)
+
+- **詳細成因**：
+  1. Telegraph 官方 API 規範單一頁面內容的 JSON 結構以 UTF-8 編碼後，其大小不可超過 **64,000 位元組**（Bytes）。若超過此限制，Telegraph API 會拒絕請求。
+  2. 系統在本地排版時，預設每頁上限為 `page_limit_bytes = 60000`（預留 4,000 位元組供全頁導覽列與換頁按鈕使用）。若某一章節包含極長的文章摘要，導致該「單篇文章」本體加上導覽列後便已超過單頁可用預算，程式為維護文章結構完整性（不隨意腰斬文章或漏失引述欄位），會主動拋出例外：
+     ```
+     ValueError: <組別>的單篇內容加上導覽超過頁面上限；請提高 telegraph.page_limit_bytes
+     ```
+- **系統內部行為**：
+  - `src/econ_digest/render/telegraph.py` 的 `render_telegraph()` 會在對外發起任何 API 呼叫前，預先精算所有文章節點與導覽列之 UTF-8 JSON 位元組數。若文章過長，會在分配公開頁面網址前立即中止，絕不在公共空間建立空頁或半殘內容。
+  - `src/econ_digest/telegraph/publish.py` 也會在發布與原地編輯前再度執行嚴格節點結構與容量校驗。
+- **維運處置**：
+  1. **調高設定檔中的單頁上限**：
+     開啟 `config.toml`，在 `[telegraph]` 區段將 `page_limit_bytes` 適度調高（最高可設為 64,000）：
+     ```toml
+     [telegraph]
+     page_limit_bytes = 63000
+     ```
+  2. **調整文章摘要深度**：
+     若調高至 63,000 ~ 64,000 仍超出上限，代表該篇內容異常龐大。可透過 `config.toml` 的 `[tiers]` 調整該文體或領域之摘要等級（例如由 Tier A 深度解析調整為 Tier B 詳細摘要），並重新執行：
+     ```sh
+     .venv/bin/econ-digest analyze --issue <期別> --reanalyze
+     .venv/bin/econ-digest send --issue <期別> --force
+     ```
