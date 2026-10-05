@@ -180,7 +180,7 @@ rm -f data/issues/te_2026.10.03/digest.json
 | **缺少 Token 或 Chat ID** | 密鑰檔未建立、權限不符或尚未與 Telegram 機器人完成配對。 | 程式拒絕發送並提示設定說明，或擲出 `ConfigError`。 | 透過安全的 `read -rsp` 指令建立 `~/.config/econ-digest/env`（權限 600），並執行 `telegram-setup --test`。 |
 | **Telegraph `FLOOD_WAIT_N`** | Telegraph API 觸發頻率限制（例如短時間內發送多個請求，回傳 `FLOOD_WAIT_7`）。 | 自動以正規表示式解析等待秒數，調用 `sleep` 暫停並自動重試（至多重試 5 次）。 | 系統自動退避重試，維運人員無須手動介入。 |
 | **缺少或無效的 Telegraph Token** | 密鑰檔未設定 `TELEGRAPH_ACCESS_TOKEN` 或該 Token 遭撤銷/無效。 | 在 `send` 時會嘗試自動呼叫 API 重新建立並寫入；若發生錯誤則中止。 | 執行 `.venv/bin/econ-digest telegraph-setup --force` 強制建立新帳號並更新密鑰。 |
-| **Telegraph 頁面超過容量上限** | 單篇內容加上導覽列超出 `page_limit_bytes` 上限（擲出 `ValueError`），或 API 回報內容超過 64,000 位元組。 | 發布前於本機檢驗節點大小，超限時立即中止，避免發布失敗或內容截斷。 | 在 `config.toml` 中調高 `[telegraph] page_limit_bytes`（上限為 64,000；預設 60,000），或調整該篇摘要深度。 |
+| **Telegraph 頁面超過容量上限** | 單篇內容加上導覽列超出 `page_limit_bytes` 上限（擲出 `ValueError`），或 API 回報內容超過 64 KB（64,000 位元組）。 | 發布前於本機檢驗節點大小，超限時立即中止，避免發布失敗或內容截斷。 | 在 `config.toml` 中調高 `[telegraph] page_limit_bytes`（上限為 64,000；預設 60,000），或調整該篇摘要深度。 |
 | **執行失敗 (Failed Run)** | 外部網路逾時、來源期別尚未釋出，或模型失敗率高於 30%。 | 每日每期至多發送一次 Telegram 失敗警報（避免洗版）；定時器於下個排程時段自動重試。 | 檢視 `data/logs/econ-digest.log` 查明失敗原因；排除外在問題後可隨時手動重新執行。 |
 | **執行鎖已被占用 (`AlreadyRunning`)** | 同一時間已有另一個 `econ-digest` 實例正在執行中。 | 取得非阻塞排他鎖（`fcntl.flock`）失敗時主動優雅退出（exit code 0），避免寫入衝突。 | 此為正常保護機制。若懷疑程序卡死，使用 `ps aux \| grep econ-digest` 確認，超時 3 小時系統會自動終止釋放。 |
 
@@ -365,7 +365,7 @@ rm -f data/issues/te_2026.10.03/digest.json
 ### 10. Telegraph 頁面超出容量上限 (Page Size Limit)
 
 - **詳細成因**：
-  1. Telegraph 官方 API 規範單一頁面內容的 JSON 結構以 UTF-8 編碼後，其大小不可超過 **64,000 位元組**（Bytes）。若超過此限制，Telegraph API 會拒絕請求。
+  1. Telegraph 官方 API 規範單一頁面內容的 JSON 結構以 UTF-8 編碼後，其大小不可超過 **64 KB（64,000 位元組）**。若超過此限制，Telegraph API 會拒絕請求。
   2. 系統在本地排版時，預設每頁上限為 `page_limit_bytes = 60000`（預留 4,000 位元組供全頁導覽列與換頁按鈕使用）。若某一章節包含極長的文章摘要，導致該「單篇文章」本體加上導覽列後便已超過單頁可用預算，程式為維護文章結構完整性（不隨意腰斬文章或漏失引述欄位），會主動拋出例外：
      ```
      ValueError: <組別>的單篇內容加上導覽超過頁面上限；請提高 telegraph.page_limit_bytes
