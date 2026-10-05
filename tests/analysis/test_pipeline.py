@@ -11,7 +11,7 @@ from econ_digest.config import Config
 from econ_digest.llm import FakeLLMClient, GwgClient, LLMError
 from econ_digest.models import Digest, Issue, load_json
 
-from conftest import BODY, answer, article, issue
+from conftest import BODY, answer, article, guide, issue, payload
 
 
 def test_digest_normalisation_cache_and_persistence(analysis_config: Config, tmp_path: Path,
@@ -137,6 +137,68 @@ def test_english_failure_gives_none_and_warning(analysis_config: Config, tmp_pat
 
     digest = analyze_issue(source, analysis_config, FakeLLMClient(responder), workdir=tmp_path / "analysis")
     assert digest.english is None and any("英文選文失敗" in warning for warning in digest.warnings)
+
+
+@pytest.mark.parametrize("repick_outcome", ["success", "guide_failure", "pick_failure"])
+def test_english_guide_failure_repicks_once_and_retains_reason(analysis_config: Config, tmp_path: Path,
+                                                           repick_outcome: str) -> None:
+    source = issue([article(f"a{i}", words=800 if i < 2 else 100) for i in range(25)])
+    config = replace(analysis_config, llm=replace(analysis_config.llm,
+                     models=replace(analysis_config.llm.models, english=("primary", "fallback"))))
+    picks: list[list[str]] = []
+
+    def responder(prompt: str, model: str, stage: str) -> dict[str, Any] | LLMError:
+        if stage == "english_pick":
+            ids = [item["id"] for item in payload(prompt.split("最近最多八次選文：")[0], "候選：")]
+            picks.append(ids)
+            if ids == ["a1"] and repick_outcome == "pick_failure":
+                return LLMError("synthetic repick unavailable", kind="quota")
+        if stage == "english_guide":
+            identifier = payload(prompt, "文章：")["article_id"]
+            if identifier == "a0" or repick_outcome == "guide_failure":
+                data = guide()
+                data["vocabulary"][0]["example_en"] = "This fabricated sentence is absent."
+                return data
+        return answer(prompt, model, stage)
+
+    client = FakeLLMClient(responder)
+    digest = analyze_issue(source, config, client, workdir=tmp_path / "analysis")
+    assert picks[0] == ["a0", "a1"]
+    assert all(ids == ["a1"] for ids in picks[1:])
+    failed_guide_calls = [call for call in client.calls if call[2] == "english_guide" and '"article_id":"a0"' in call[0]]
+    assert [call[1] for call in failed_guide_calls] == ["primary", "primary", "fallback", "fallback"]
+    assert any("must occur verbatim" in warning for warning in digest.warnings)
+    if repick_outcome == "success":
+        assert digest.english.article_id == "a1" and len(picks) == 2
+        assert any("已改選另一篇" in warning for warning in digest.warnings)
+    else:
+        assert digest.english is None
+        assert any("本期未提供學習指南" in warning for warning in digest.warnings)
+        if repick_outcome == "pick_failure":
+            assert any("synthetic repick unavailable" in warning for warning in digest.warnings)
+    cached = FakeLLMClient(responder)
+    rerun = analyze_issue(source, config, cached, workdir=tmp_path / "analysis")
+    assert (rerun.english.article_id if rerun.english else None) == (digest.english.article_id if digest.english else None)
+
+
+def test_guide_failure_with_no_other_candidate_reports_reason(analysis_config: Config, tmp_path: Path,
+                                                            caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+    source = issue([article(f"a{i}", words=800 if i == 0 else 100) for i in range(25)])
+
+    def responder(prompt: str, model: str, stage: str) -> dict[str, Any] | LLMError:
+        if stage == "english_guide":
+            return LLMError("synthetic invalid JSON details", kind="invalid_output")
+        return answer(prompt, model, stage)
+
+    client = FakeLLMClient(responder)
+    with caplog.at_level(logging.WARNING):
+        digest = analyze_issue(source, analysis_config, client, workdir=tmp_path / "analysis")
+    assert digest.english is None
+    assert len([call for call in client.calls if call[2] == "english_pick"]) == 1
+    assert any("synthetic invalid JSON details" in warning and "沒有其他符合條件" in warning for warning in digest.warnings)
+    assert any("本期未提供學習指南" in record.message and "synthetic invalid JSON details" in record.message
+               for record in caplog.records)
 
 
 def test_cover_pair_and_quote_repair(analysis_config: Config, tmp_path: Path) -> None:

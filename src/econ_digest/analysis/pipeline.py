@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from collections.abc import Callable
-from dataclasses import fields
+from dataclasses import fields, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from ..config import Config
 from ..fetch import issue_directory
-from ..llm import GwgClient, LLMClient, run_parallel
+from ..llm import GwgClient, LLMClient, LLMError, run_parallel
 from ..models import ArticleSummary, Classification, Digest, EnglishPick, Issue, WeekBrief, save_json
 from ..signals import find_taiwan_signals
 from ..zhtw import lint_zh_tw, normalize_tree
@@ -124,20 +125,66 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
     summaries: dict[str, ArticleSummary] = {}
     week_brief: WeekBrief | None = None
     english: EnglishPick | None = None
+    recovered_english_failure = 0
+
+    class EnglishClient:
+        error = ""
+
+        def generate_json(self, *args: Any, **kwargs: Any) -> Any:
+            try:
+                return llm.generate_json(*args, **kwargs)
+            except (LLMError, ValueError) as exc:
+                self.error = str(exc)
+                raise
+
+    english_client = EnglishClient()
+    english_runner = UnitRunner(english_client, workdir, progress)
+
+    def run_english(unit: Unit) -> tuple[UnitResult, str]:
+        errors: list[str] = []
+        english_client.error = ""
+
+        def validate(data: dict[str, Any]) -> None:
+            try:
+                unit.validate(data)
+            except ValueError as exc:
+                errors.append(str(exc))
+                raise
+
+        result = english_runner.run(replace(unit, validate=validate))
+        return result, english_client.error or (errors[-1] if errors else result.error_kind or "")
 
     def english_job(_: Unit) -> tuple[EnglishPick | None, str | None]:
+        nonlocal recovered_english_failure
         assert pick is not None
-        selection = runner.run(pick)
-        if not selection.data:
-            return None, f"英文選文失敗（{selection.error_kind}），本期未提供學習指南。"
-        article = by_id[selection.data["article_id"]]
-        guide = runner.run(guide_unit(issue, article, config))
-        if not guide.data:
-            return None, f"英文學習指南失敗（{guide.error_kind}），本期未提供學習指南。"
-        names = {field.name for field in fields(EnglishPick)} - {"article_id", "reason_zh", "word_count", "reading_minutes"}
-        data = {key: value for key, value in guide.data.items() if key in names}
-        return EnglishPick.from_dict({**data, "article_id": article.id, "reason_zh": selection.data["reason_zh"],
-                                      "word_count": article.word_count, "reading_minutes": math.ceil(article.word_count / 150)}), None
+        current_pick = pick
+        failures: list[str] = []
+        for attempt in range(2):
+            selection, reason = run_english(current_pick)
+            if not selection.data:
+                failures.append(f"英文選文失敗（{selection.error_kind}）：{reason}")
+                break
+            article = by_id[selection.data["article_id"]]
+            guide, reason = run_english(guide_unit(issue, article, config))
+            if guide.data:
+                names = {field.name for field in fields(EnglishPick)} - {"article_id", "reason_zh", "word_count", "reading_minutes"}
+                data = {key: value for key, value in guide.data.items() if key in names}
+                warning = None
+                if failures:
+                    recovered_english_failure = 1
+                    warning = "；".join(failures) + "；已改選另一篇提供學習指南。"
+                return EnglishPick.from_dict({**data, "article_id": article.id, "reason_zh": selection.data["reason_zh"],
+                                              "word_count": article.word_count, "reading_minutes": math.ceil(article.word_count / 150)}), warning
+            failures.append(f"英文學習指南失敗（{guide.error_kind}，文章 {article.id}）：{reason}")
+            if attempt == 0:
+                retry_pick = pick_unit(issue, classifications, config, english_history, exclude_ids=frozenset({article.id}))
+                if retry_pick is None:
+                    failures.append("沒有其他符合條件的英文選文")
+                    break
+                current_pick = retry_pick
+        warning = "；".join(failures) + "；本期未提供學習指南。"
+        logging.getLogger(__name__).warning("%s", warning)
+        return None, warning
 
     def final_job(unit: Unit) -> UnitResult | tuple[EnglishPick | None, str | None]:
         return english_job(unit) if unit.stage == "english_pick" else runner.run(unit)
@@ -164,7 +211,10 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
             warnings.append(f"{result.unit.tier} 級摘要失敗（{result.error_kind}）：" + "、".join(result.unit.article_ids))
     if not pick:
         warnings.append("沒有符合篇幅與文章種類條件的英文選文。")
-    failed_units = runner.failed_units - recovered_focus_failure
+    runner.total_units += english_runner.total_units
+    runner.failed_units += english_runner.failed_units
+    runner.stats.extend(english_runner.stats)
+    failed_units = runner.failed_units - recovered_focus_failure - recovered_english_failure
     if runner.total_units and failed_units / runner.total_units > 0.30:
         raise AnalysisError(f"分析失敗比例超過 30%（{failed_units}/{runner.total_units}）；請稍後重試。")
     if only_tier is not None or limit is not None:

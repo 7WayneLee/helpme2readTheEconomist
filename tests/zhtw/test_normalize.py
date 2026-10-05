@@ -107,12 +107,12 @@ def test_custom_skip_keys_replace_defaults() -> None:
     assert normalize_tree(["軟件", ("視頻",)]) == ["軟體", ("影片",)]
 
 
-def test_tree_batches_opencc_once(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tree_batches_probe_and_conversion(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, Any]] = []
     monkeypatch.setattr(normalizer.shutil, "which", lambda executable: "/usr/bin/opencc")
 
     def convert(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        assert args == ["/usr/bin/opencc", "-c", "s2tw"]
+        assert args[:2] == ["/usr/bin/opencc", "-c"] and args[2] in {"s2t", "s2tw"}
         assert kwargs["check"] is True
         calls.append(kwargs)
         return subprocess.CompletedProcess(args, 0, stdout=kwargs["input"].replace("国", "國").replace("台", "臺"))
@@ -120,12 +120,13 @@ def test_tree_batches_opencc_once(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(normalizer.subprocess, "run", convert)
     value = {"title": "中国台灣", "entries": ["視頻\n多行", "軟件", ""], "en": "SKIPPED中国"}
     result = normalize_tree(value)
-    assert len(calls) == 1
-    assert "SKIPPED中国" not in calls[0]["input"]
+    assert len(calls) == 2
+    assert all("SKIPPED中国" not in call["input"] for call in calls)
+    assert calls[0]["input"] == "国"
     assert result == {"title": "中國台灣", "entries": ["影片\n多行", "軟體", ""], "en": "SKIPPED中国"}
 
 
-def test_broken_separator_preserves_original_runs_with_one_call(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_broken_separator_preserves_original_runs(monkeypatch: pytest.MonkeyPatch) -> None:
     inputs: list[str] = []
     monkeypatch.setattr(normalizer.shutil, "which", lambda executable: "opencc")
 
@@ -136,7 +137,7 @@ def test_broken_separator_preserves_original_runs_with_one_call(monkeypatch: pyt
 
     monkeypatch.setattr(normalizer.subprocess, "run", convert)
     assert normalize_tree(["中国", "国際"]) == ["中国", "国際"]
-    assert len(inputs) == 1
+    assert len(inputs) == 2
 
 
 def test_empty_tree_makes_no_subprocess_call(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -239,11 +240,13 @@ def test_cjk_runs_end_at_punctuation_whitespace_latin_and_digits(monkeypatch: py
     source = "干預，国臺 灣国X国2国；曼蘇里、魯托、范德賴恩、于坦、臺灣"
     assert normalize_tree([source, "国"]) == [
         "干預，國台 灣國X國2國；曼蘇里、魯托、范德賴恩、于坦、臺灣", "國"]
-    assert len(inputs) == 1
-    assert all(text not in inputs[0] for text in ("干預", "曼蘇里", "魯托", "范德賴恩", "于坦", "臺灣"))
+    assert len(inputs) == 2
+    assert inputs[0] == "国"
+    assert all(text not in inputs[1] for text in ("干預", "曼蘇里", "魯托", "范德賴恩", "于坦", "臺灣"))
 
 
-def test_cp950_detector_and_lint_cover_requested_characters() -> None:
+@pytest.mark.usefixtures("no_opencc")
+def test_cp950_fallback_detector_and_lint_cover_requested_characters() -> None:
     flagged = "们这说时为国会对发经过还进现间东车长书买卖门问题让认识语读谁调资质报纸边产业务决议选举头历钟汇获团战总统热线军队冲苏"
     assert all(normalizer._is_simplified(character) for character in flagged)
     assert not any(normalizer._is_simplified(character) for character in "里干范托后台面系制准云只才斗于臺灣蘇魯")
@@ -251,6 +254,50 @@ def test_cp950_detector_and_lint_cover_requested_characters() -> None:
         assert normalizer._is_simplified(character)
         assert any(character in warning for warning in lint_zh_tw(character))
     assert not normalizer._is_simplified("😀")
+
+
+def test_non_big5_traditional_characters_use_one_s2t_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(normalizer.shutil, "which", lambda _: "opencc")
+
+    def convert(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append((args[2], kwargs["input"]))
+        return subprocess.CompletedProcess(args, 0, stdout=kwargs["input"].replace("国", "國").replace("说", "說"))
+
+    monkeypatch.setattr(normalizer.subprocess, "run", convert)
+    assert lint_zh_tw("肽、肽、国、说、国") == ["疑似殘留簡體字：国、说。"]
+    assert calls == [("s2t", "国\n肽\n说")]
+    calls.clear()
+    assert normalize_tree(["肽", "肽", "台灣肽", "国肽", {"en": "SKIP说"}]) == [
+        "肽", "肽", "台灣肽", "國肽", {"en": "SKIP说"}]
+    assert calls[0] == ("s2t", "国\n肽")
+    assert calls[1] == ("s2tw", "国肽")
+
+
+@pytest.mark.skipif(shutil.which("opencc") is None, reason="OpenCC CLI is not installed")
+def test_real_opencc_preserves_traditional_peptide_character() -> None:
+    assert lint_zh_tw("肽") == []
+    assert normalize_tree(["肽", "胜肽", "胜肽和软件"]) == ["肽", "胜肽", "胜肽和軟體"]
+    assert any("说" in warning for warning in lint_zh_tw("肽说话"))
+
+
+@pytest.mark.usefixtures("no_opencc")
+def test_missing_opencc_keeps_big5_fallback() -> None:
+    assert lint_zh_tw("肽国") == ["疑似殘留簡體字：国、肽。"]
+
+
+@pytest.mark.usefixtures("no_opencc")
+def test_leaders_label_replaced_in_every_zh_field() -> None:
+    value = {"reason_zh": "典型社論的清晰論證結構", "nested": [{"note_zh": "社論。"}],
+             "example_en": "社論", "sentence_en": "社論"}
+    assert normalize_tree(value) == {"reason_zh": "典型經濟學人立場的清晰論證結構",
+                                    "nested": [{"note_zh": "經濟學人立場。"}],
+                                    "example_en": "社論", "sentence_en": "社論"}
+
+
+@pytest.mark.skipif(shutil.which("opencc") is None, reason="OpenCC CLI is not installed")
+def test_leaders_label_replaced_after_opencc() -> None:
+    assert normalize_zh_tw("社论的论点") == "經濟學人立場的論點"
 
 
 @pytest.mark.usefixtures("no_opencc")

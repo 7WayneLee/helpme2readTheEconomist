@@ -10,7 +10,8 @@ from ..models import Article
 
 _CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
 _PUNCTUATION = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"',
-                            "–": "-", "—": "-", "−": "-", "\u00ad": ""})
+                            "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "−": "-",
+                            "…": "...", "\u00ad": ""})
 
 
 def text(value: Any, field: str) -> str:
@@ -38,14 +39,16 @@ def object_items(data: dict[str, Any], key: str, ids: set[str]) -> list[dict[str
 
 
 def canonical_english(value: str) -> str:
-    return " ".join(value.translate(_PUNCTUATION).split())
+    value = " ".join(value.translate(_PUNCTUATION).split())
+    value = re.sub(r"\s*-\s*", "-", value)
+    return re.sub(r"\.\s*\.\s*\.", "...", value)
 
 
 def source_contains(article: Article, excerpt: str, *, trimmed: bool = False) -> bool:
     source = canonical_english("\n".join(article.paragraphs))
     if not trimmed:
         return canonical_english(excerpt) in source
-    parts = [canonical_english(part).strip() for part in re.split(r"…|\.{3}", excerpt)]
+    parts = [part.strip() for part in canonical_english(excerpt).split("...")]
     parts = [part for part in parts if part]
     if not parts:
         return False
@@ -144,12 +147,73 @@ def validate_summary(item: dict[str, Any], article: Article, tier: str, *, leade
             raise ValueError("leader_stance requires 2–3 sentences")
 
 
+_IRREGULAR_VERBS = {
+    "arise": "arose arisen", "be": "am is are was were been being", "bear": "bore borne born",
+    "beat": "beat beaten", "become": "became become", "begin": "began begun", "bend": "bent",
+    "bind": "bound", "bite": "bit bitten", "bleed": "bled", "blow": "blew blown",
+    "break": "broke broken", "breed": "bred", "bring": "brought", "build": "built",
+    "buy": "bought", "cast": "cast", "catch": "caught", "choose": "chose chosen", "cling": "clung",
+    "come": "came come", "cost": "cost", "creep": "crept", "cut": "cut", "deal": "dealt",
+    "dig": "dug", "do": "did done", "draw": "drew drawn", "drink": "drank drunk",
+    "drive": "drove driven", "eat": "ate eaten", "fall": "fell fallen", "feed": "fed",
+    "feel": "felt", "fight": "fought", "find": "found", "flee": "fled", "fly": "flew flown",
+    "forbid": "forbade forbidden", "forget": "forgot forgotten", "forgive": "forgave forgiven",
+    "freeze": "froze frozen", "get": "got gotten", "give": "gave given", "go": "went gone",
+    "grow": "grew grown", "hang": "hung hanged", "have": "has had", "hear": "heard",
+    "hide": "hid hidden", "hit": "hit", "hold": "held", "hurt": "hurt", "keep": "kept",
+    "know": "knew known", "lay": "laid", "lead": "led", "leave": "left", "lend": "lent",
+    "let": "let", "lie": "lay lain", "lose": "lost", "make": "made", "mean": "meant",
+    "meet": "met", "pay": "paid", "put": "put", "read": "read", "ride": "rode ridden",
+    "ring": "rang rung", "rise": "rose risen", "run": "ran run", "say": "said",
+    "see": "saw seen", "seek": "sought", "sell": "sold", "send": "sent", "set": "set",
+    "shake": "shook shaken", "shed": "shed", "shine": "shone shined", "shoot": "shot",
+    "show": "showed shown", "shrink": "shrank shrunk", "shut": "shut", "sing": "sang sung",
+    "sink": "sank sunk", "sit": "sat", "sleep": "slept", "slide": "slid", "speak": "spoke spoken",
+    "spend": "spent", "spin": "spun", "split": "split", "spread": "spread", "spring": "sprang sprung",
+    "stand": "stood", "steal": "stole stolen", "stick": "stuck", "strike": "struck stricken",
+    "string": "strung", "swear": "swore sworn", "sweep": "swept", "swim": "swam swum",
+    "swing": "swung", "take": "took taken", "teach": "taught", "tear": "tore torn",
+    "tell": "told", "think": "thought", "throw": "threw thrown", "undergo": "underwent undergone",
+    "understand": "understood", "wake": "woke woken", "wear": "wore worn", "weep": "wept",
+    "win": "won", "withdraw": "withdrew withdrawn", "write": "wrote written",
+}
+_IRREGULAR_NOUNS = {
+    "child": "children", "person": "people", "man": "men", "woman": "women", "mouse": "mice",
+    "foot": "feet", "tooth": "teeth", "goose": "geese", "ox": "oxen", "analysis": "analyses",
+    "basis": "bases", "crisis": "crises", "thesis": "theses", "criterion": "criteria",
+    "phenomenon": "phenomena", "index": "indices indexes", "matrix": "matrices",
+    "life": "lives", "wife": "wives", "knife": "knives", "half": "halves", "leaf": "leaves",
+    "shelf": "shelves", "wolf": "wolves", "loaf": "loaves", "self": "selves",
+}
+
+
 def _vocabulary_forms(word: str, pos: str) -> set[str]:
-    """Regular inflections; irregular forms must be named in the study note."""
-    word = word.casefold()
+    """Inflect a dictionary headword, including the head of a multi-word term."""
+    word = canonical_english(word).strip().casefold()
     forms = {word}
+    if " " in word:
+        head, tail = word.split(" ", 1)
+        if pos in {"v.", "phr."}:
+            forms.update(form + " " + tail for form in _vocabulary_forms(head, "v."))
+        prefix, head = word.rsplit(" ", 1)
+        if pos in {"n.", "adj.", "adv.", "phr."}:
+            forms.update(prefix + " " + form for form in _vocabulary_forms(head, "n." if pos == "phr." else pos))
+        return forms
+    if pos == "phr.":
+        return _vocabulary_forms(word, "v.") | _vocabulary_forms(word, "n.")
     if pos not in {"n.", "v.", "adj.", "adv."}:
         return forms
+    if pos == "v.":
+        forms.update(_IRREGULAR_VERBS.get(word, "").split())
+        for prefix in ("under", "over", "fore", "with", "mis", "out", "off", "un", "up", "re"):
+            if word.startswith(prefix):
+                forms.update(prefix + form for form in _IRREGULAR_VERBS.get(word[len(prefix):], "").split())
+    elif pos == "n.":
+        forms.update(_IRREGULAR_NOUNS.get(word, "").split())
+    else:
+        forms.update({"good": "better best", "well": "better best", "bad": "worse worst",
+                      "far": "farther further farthest furthest", "little": "less least",
+                      "many": "more most", "much": "more most"}.get(word, "").split())
     forms.update({word + "s", word + "es"})
     if word.endswith("y") and len(word) > 1 and word[-2] not in "aeiou":
         forms.add(word[:-1] + "ies")
@@ -181,12 +245,15 @@ def validate_guide(data: dict[str, Any], article: Article, config: EnglishConfig
     length(text(data.get("pre_reading_zh"), "pre_reading_zh"), "pre_reading_zh", 100, 330)
     for key, count in (("vocabulary", config.vocab_count), ("phrases", config.phrase_count)):
         items = data.get(key)
-        if not isinstance(items, list) or len(items) != count or any(not isinstance(item, dict) for item in items):
-            raise ValueError(f"{key} requires exactly {count} objects")
+        if (not isinstance(items, list) or not max(1, count - 2) <= len(items) <= count + 2
+                or any(not isinstance(item, dict) for item in items)):
+            raise ValueError(f"{key} requires approximately {count} objects (±2, at least 1)")
+        items = items[:count]
+        data[key] = items
         terms: list[str] = []
-        for item in items:
+        for index, item in enumerate(items, 1):
             term = text(item.get("word" if key == "vocabulary" else "phrase"), key)
-            terms.append(term.casefold())
+            terms.append(canonical_english(term).strip().casefold())
             if key == "vocabulary":
                 if not isinstance(item.get("pos"), str) or item["pos"] not in {"n.", "v.", "adj.", "adv.", "phr."}:
                     raise ValueError("vocabulary.pos must be n./v./adj./adv./phr.")
@@ -194,14 +261,10 @@ def validate_guide(data: dict[str, Any], article: Article, config: EnglishConfig
             text(item.get("meaning_zh"), f"{key}.meaning_zh")
             example = text(item.get("example_en"), f"{key}.example_en")
             if not source_contains(article, example, trimmed=True):
-                raise ValueError(f"{key}.example_en must occur verbatim in the source")
+                raise ValueError(f"{key}[{index}].example_en for {term!r} must occur verbatim in the source")
             if len(example.split()) > 42:
                 raise ValueError(f"{key}.example_en must be trimmed to approximately 40 words")
-            forms = {term}
-            if key == "vocabulary":
-                forms = _vocabulary_forms(term, item["pos"])
-                forms.update(re.findall(r"(?:原文|過去式|過去分詞|現在分詞|複數|比較級|最高級)[^A-Za-z]{0,30}"
-                                        r"([A-Za-z]+(?:[-'][A-Za-z]+)*)", item["note_zh"]))
+            forms = _vocabulary_forms(term, item["pos"] if key == "vocabulary" else "phr.")
             if not _example_has_term(example, forms):
                 raise ValueError(f"{key}.example_en must contain {term}")
         if len(set(terms)) != len(terms):
@@ -209,10 +272,10 @@ def validate_guide(data: dict[str, Any], article: Article, config: EnglishConfig
     sentences = data.get("sentences")
     if not isinstance(sentences, list) or not 2 <= len(sentences) <= 3 or any(not isinstance(item, dict) for item in sentences):
         raise ValueError("sentences requires 2–3 objects")
-    for item in sentences:
+    for index, item in enumerate(sentences, 1):
         sentence = text(item.get("sentence_en"), "sentence_en")
-        if not source_contains(article, sentence):
-            raise ValueError("sentence_en must occur verbatim in the source")
+        if not source_contains(article, sentence, trimmed=True):
+            raise ValueError(f"sentences[{index}].sentence_en must occur verbatim in the source")
         text(item.get("breakdown_zh"), "breakdown_zh")
         text(item.get("translation_zh"), "translation_zh")
     strings(data.get("writing_notes_zh"), "writing_notes_zh", 1, 2)

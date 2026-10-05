@@ -40,7 +40,7 @@ def _warn_opencc(message: str) -> None:
 
 
 @lru_cache(maxsize=8192)
-def _is_simplified(character: str) -> bool:
+def _outside_big5(character: str) -> bool:
     if not _CJK.fullmatch(character):
         return False
     try:
@@ -50,13 +50,28 @@ def _is_simplified(character: str) -> bool:
     return False
 
 
-def _has_simplified(text: str) -> bool:
-    return any(_is_simplified(character) for character in text)
+def _simplified_characters(text: str) -> set[str]:
+    candidates = sorted(character for character in set(text) if _outside_big5(character))
+    if not candidates:
+        return set()
+    executable = shutil.which("opencc")
+    if executable is None:
+        return set(candidates)
+    # Probe individual characters in one batch, without phrase-context conversions.
+    output = _convert_text("\n".join(candidates), executable, config="s2t")
+    converted = output.split("\n") if output is not None else []
+    if len(converted) != len(candidates):
+        return set(candidates)
+    return {source for source, target in zip(candidates, converted) if source != target}
 
 
-def _convert_text(text: str, executable: str) -> str | None:
+def _is_simplified(character: str) -> bool:
+    return character in _simplified_characters(character)
+
+
+def _convert_text(text: str, executable: str, *, config: str = "s2tw") -> str | None:
     try:
-        result = subprocess.run([executable, "-c", "s2tw"], input=text, capture_output=True,
+        result = subprocess.run([executable, "-c", config], input=text, capture_output=True,
                                 text=True, encoding="utf-8", check=True, timeout=30)
     except (OSError, subprocess.SubprocessError, UnicodeError) as exc:
         _warn_opencc(type(exc).__name__)
@@ -86,6 +101,7 @@ def _convert_batch(strings: list[str]) -> list[str]:
 
 def _finish(text: str) -> str:
     text = _TERMS.sub(lambda match: _REPLACEMENTS.get(match.group(), match.group()), text)
+    text = text.replace("社論", "經濟學人立場")
 
     def quote(match: re.Match[str]) -> str:
         span = match.group(1)
@@ -114,17 +130,19 @@ def _map_strings(value: Any, transform: Callable[[str], str], skip_keys: frozens
 
 
 def normalize_tree(value: Any, skip_keys: frozenset[str] = DEFAULT_SKIP_KEYS) -> Any:
-    runs: list[str] = []
+    all_runs: list[str] = []
 
     def collect(text: str) -> str:
-        runs.extend(match.group() for match in _CJK.finditer(text) if _has_simplified(match.group()))
+        all_runs.extend(match.group() for match in _CJK.finditer(text))
         return text
 
     tree = _map_strings(value, collect, skip_keys)
+    simplified = _simplified_characters("".join(all_runs))
+    runs = [run for run in all_runs if any(character in simplified for character in run)]
     converted = iter(_convert_batch(runs))
 
     def replace(text: str) -> str:
-        return _finish(_CJK.sub(lambda match: next(converted) if _has_simplified(match.group()) else match.group(), text))
+        return _finish(_CJK.sub(lambda match: next(converted) if any(character in simplified for character in match.group()) else match.group(), text))
 
     return _map_strings(tree, replace, skip_keys)
 
@@ -132,7 +150,7 @@ def normalize_tree(value: Any, skip_keys: frozenset[str] = DEFAULT_SKIP_KEYS) ->
 def lint_zh_tw(text: str) -> list[str]:
     remaining = {match.group() for match in _TERMS.finditer(text) if match.group() in _REPLACEMENTS}
     warnings = [f"建議將「{source}」改為「{target}」。" for source, target in _GLOSSARY if source in remaining]
-    characters = sorted(character for character in set(text) if _is_simplified(character))
+    characters = sorted(_simplified_characters(text))
     if characters:
         warnings.append("疑似殘留簡體字：" + "、".join(characters) + "。")
     return warnings

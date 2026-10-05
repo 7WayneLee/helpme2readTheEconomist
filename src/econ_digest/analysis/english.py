@@ -18,8 +18,9 @@ def english_candidates(issue: Issue, config: Config) -> list[Article]:
 
 
 def pick_unit(issue: Issue, classifications: dict[str, Classification], config: Config,
-              history: list[dict[str, Any]] | None = None) -> Unit | None:
-    candidates = english_candidates(issue, config)
+              history: list[dict[str, Any]] | None = None, *,
+              exclude_ids: frozenset[str] = frozenset()) -> Unit | None:
+    candidates = [article for article in english_candidates(issue, config) if article.id not in exclude_ids]
     if not candidates:
         return None
     ids = {article.id for article in candidates}

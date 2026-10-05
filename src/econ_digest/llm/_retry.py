@@ -94,6 +94,8 @@ class JSONClient:
                     "total_tokens": attempt.total_tokens, "duration_seconds": attempt.duration_seconds,
                 }
                 attempts.append(record)
+                if attempt.kind == "invalid_output":
+                    logger.warning("LLM validation failed stage=%s model=%s: %s", stage, model, attempt.error)
                 logger.info("LLM stage=%s model=%s outcome=%s tokens=%d seconds=%.3f", stage, model,
                             attempt.kind, attempt.total_tokens, attempt.duration_seconds)
                 if attempt.kind == "success":

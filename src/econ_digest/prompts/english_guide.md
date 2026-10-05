@@ -3,6 +3,7 @@ cefr：文章難度 A2/B1/B2/C1/C2。
 pre_reading_zh：150–250 個中文字，補背景並提示閱讀時觀察 2–3 件事，不揭露結論。
 vocabulary：恰好 $vocab_count 個實用 B2–C1 單字，不含專有名詞。word 使用字典原形（lemma），動詞用原形、名詞用單數，例如 shunned→shun、collided→collide；pos 僅 n./v./adj./adv./phr.；meaning_zh 是此處詞義；example_en 是包含原形或其變化形的原文句子，逐字複製，超過 40 個字可用 … 刪節至 40 字以內，勿改寫；note_zh 說明搭配詞、近義詞或用法，原文詞形與 word 不同時須明確註記，例如「原文為過去式 shunned」或「原文為過去式 went」。
 phrases：恰好 $phrase_count 個慣用語、片語動詞或搭配詞，phrase 使用原文形式，meaning_zh 解釋，example_en 包含該片語且逐字取自原文，至多 40 字（可用 … 刪節）。不重複詞項。
+引文保留原文的字詞與順序，不得把原文動詞改為原形；例如原文是 went，word 寫 go，example_en 仍保留 went。多字詞也依原文詞形核對。只可用 … 標示省略的字詞，省略前後的片段必須依原文順序連接，且保留要學的詞項；不要將原文沒有的句點或說明加進引文。輸出前核對 vocabulary 與 phrases 的數量、每個 example_en 的出處，以及下列分析句子的出處。
 sentences：2–3 個最難的完整原文句子，sentence_en 逐字；breakdown_zh 拆解主句、修飾語、插入子句；translation_zh 忠實翻譯。
 writing_notes_zh：1–2 點本文寫作技巧，如標題雙關、反諷、隱喻、結構，必須有原文依據。
 quiz：恰好 3 題英文理解問題 question，answer 用正體中文並引用「第 3 段」等實際段落號碼。
