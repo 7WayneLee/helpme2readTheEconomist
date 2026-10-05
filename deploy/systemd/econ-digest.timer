@@ -1,0 +1,15 @@
+[Unit]
+Description=Check for the latest Economist issue throughout the weekend
+
+[Timer]
+OnCalendar=Sat *-*-* 07:00:00 Asia/Taipei
+OnCalendar=Sat *-*-* 13:00:00 Asia/Taipei
+OnCalendar=Sat *-*-* 19:00:00 Asia/Taipei
+OnCalendar=Sun *-*-* 09:00:00 Asia/Taipei
+OnCalendar=Sun *-*-* 20:00:00 Asia/Taipei
+Persistent=true
+RandomizedDelaySec=10min
+Unit=econ-digest.service
+
+[Install]
+WantedBy=timers.target
