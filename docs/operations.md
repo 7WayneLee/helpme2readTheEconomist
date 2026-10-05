@@ -19,7 +19,7 @@
 - [私人網站發布與備份維運](#私人網站發布與備份維運)
   - [伺服器規格與 Caddyfile 配置](#伺服器規格與-caddyfile-配置)
   - [雙層導覽架構與出處標註維運](#雙層導覽架構與出處標註維運)
-  - [發布流程與 SSH/rsync 機制](#發布流程與-sshrsync-機制)
+  - [發布流程與 SSH tar 暫存替換機制](#發布流程與-ssh-tar-暫存替換機制)
   - [發布失敗自動備援機制](#發布失敗自動備援機制)
   - [私有 GitHub 儲存庫備份維運](#私有-github-儲存庫備份維運)
 - [Telegram 私人聊天室與頻道維運](#telegram-私人聊天室與頻道維運)
@@ -37,15 +37,15 @@
   - [5. 缺少 Token、Chat ID 或 Channel ID](#5-缺少-tokenchat-id-或-channel-id)
   - [6. 執行失敗與重試機制 (Failed Run)](#6-執行失敗與重試機制-failed-run)
   - [7. 執行鎖衝突 (Lock already held)](#7-執行鎖衝突-lock-already-held)
-  - [8. Telegraph: FLOOD_WAIT_N](#8-telegraph-flood_wait_n)
+  - [8. Telegraph: FLOOD_WAIT_N](#8-telegraph-floodwaitn)
   - [9. 缺少或無效的 Telegraph Access Token](#9-缺少或無效的-telegraph-access-token)
   - [10. Telegraph 頁面超出容量上限 (Page Size Limit)](#10-telegraph-頁面超出容量上限-page-size-limit)
   - [11. 原地維護機制與模式限制 (`send --pages-only`)](#11-原地維護機制與模式限制-send---pages-only)
-  - [12. 私人網站發布與 SSH / rsync 失敗排查](#12-私人網站發布與-ssh--rsync-失敗排查)
+  - [12. 私人網站發布與 SSH / tar 失敗排查](#12-私人網站發布與-ssh--tar-失敗排查)
   - [13. Telegram 內建瀏覽器無法處理 Basic Auth 彈窗問題](#13-telegram-內建瀏覽器無法處理-basic-auth-彈窗問題)
   - [14. 網站備份 push 失敗排查](#14-網站備份-push-失敗排查)
   - [15. 英文學習選文或指南失敗與容錯機制](#15-英文學習選文或指南失敗與容錯機制)
-  - [16. edit 與 ground 階段耗時與 600 秒逾時處理](#16-edit-與-ground-階段耗時與-600-秒逾時處理)
+  - [16. edit 與 ground 階段耗時與逾時處理](#16-edit-與-ground-階段耗時與逾時處理)
   - [17. 中央社新聞檢索異常與快取維護](#17-中央社新聞檢索異常與快取維護)
   - [18. 台灣事實檔更新提醒處理工作流](#18-台灣事實檔更新提醒處理工作流)
   - [19. 標題與要聞編修驗證退回機制](#19-標題與要聞編修驗證退回機制)
@@ -161,7 +161,7 @@ systemctl --user start econ-digest.service
 .venv/bin/econ-digest send --issue 2026.10.03 --force
 ```
 - **Telegraph 原地編輯（In-Place Edit）**：系統會讀取既有的 `telegraph_pages.json`，對已發布的 Telegraph 頁面進行**原地編輯（EDIT）**更新內容。網址維持完全不變，先前已送出的 Instant View 連結持續有效。
-- **網站重新發布與備份**：重新建置 `output/` 網站、rsync 同步至遠端伺服器，並 push 備份至私有儲存庫。
+- **網站重新發布與備份**：重新建置 `output/` 網站、透過 SSH tar 串流暫存替換發布至遠端伺服器，並 push 備份至私有儲存庫。
 - **Messages 模式行為**：若設定檔中為 `[telegram] delivery = "messages"`，則自第一則起重新發送全部切分訊息。
 
 ---
@@ -191,7 +191,7 @@ systemctl --user start econ-digest.service
 ```
 - **完整維護動作**：
   1. 重建本地多頁網站（`output/`）。
-  2. rsync 發布更新至遠端 Web 伺服器（若 `[site] enabled = true`）。
+  2. 透過 SSH tar 串流暫存替換發布更新至遠端 Web 伺服器（若 `[site] enabled = true`）。
   3. 對既有的 Telegraph 頁面進行**原地編輯（EDIT）**（網址維持不變）。
   4. 提交並 push 至私有 GitHub 儲存庫（若 `[backup] enabled = true`）。
 - **零干擾保障**：不發送任何 Telegram 聊天室或頻道訊息，亦不修改 `state.json` 的 `delivered` 傳送狀態。
@@ -276,20 +276,21 @@ site.example.com {
 3. **頁尾章節切換連結（Previous / Next Links）**：各章節底部提供「‹ 前一章節」與「後一章節 ›」切換按鈕，方便循序通讀整份期刊導讀。
 4. **客觀查證出處標註**：在台灣專區及相關文章之「與台灣的關聯」或「對台灣的意涵」段落下方，精準呈現至多 3 筆「依據：中央社 YYYY/MM/DD〈標題〉」外部來源超連結，便於核對第一手權威報導。
 
-### 發布流程與 SSH/rsync 機制
+### 發布流程與 SSH tar 暫存替換機制
 
 在 `config.toml` 中配置 `[site]`：
 ```toml
 [site]
 enabled = true
 base_url = "https://site.example.com"
-ssh_host = "my-vm"
+ssh_host = "your-server"
 remote_dir = "/var/www/site"
 ssh_timeout_seconds = 30
 ```
-- 發布時會自動建立遠端目錄（`remote_dir/<期別>`、`remote_dir/assets`、`remote_dir/covers`）。
-- 採用 `rsync -a --chmod=D755,F644 --delete` 同步本期頁面與樣式。
-- 將封面圖寫入臨時檔案並以隨機雜湊名稱同步至遠端 `/covers/`。
+- 發布前進行環境預檢：本機必須存在 `ssh` 與 `tar`，系統並會透過 SSH 於遠端伺服器執行 `command -v tar` 確認支援。
+- 本期發布目錄（含頁面與樣式）以 tar 封裝透過 SSH 串流傳輸至遠端暫存目錄（`remote_dir/.incoming/<name>.<nonce>`）解開，並套用目錄 755、檔案 644 之權限。
+- 採用原子替換（atomic swap）方式完成部署：舊版本目錄暫存為 `.backup` 備份，若替換過程失敗自動還原；替換成功後自動清理備份目錄。
+- 將封面圖以 32 碼隨機雜湊檔名部署至遠端 `/covers/`，供 Telegraph 即時檢視讀取。
 
 ### 發布失敗自動備援機制
 
@@ -356,13 +357,18 @@ author_email = "you@example.com"
 1. **網址路徑日期嚴格解析**：
    - 中央社新聞之真實刊登日期，系統一律透過正規表達式自新聞 URL 路徑直接提取（`/news/[a-z]+/(\d{8})\d+\.aspx$`，取出 `YYYYMMDD`），並轉換為 ISO 日期物件。
    - **避免時間誤差**：絕不採用外部搜尋引擎或中繼資料呈現之發布時間，防範搜尋引擎索引時間偏差導致證據時序錯亂。
-2. **禮貌頻率限制（Polite Rate Limit）**：
-   - 客戶端在發起每次 HTTP 連線時，嚴格維護至少 **1.0 秒**（`1.0s`）之請求冷卻間隔，展現對中央社新聞伺服器之禮貌與善意，防止造成頻寬壓力。
-3. **短摘錄快取於 `data/research/`**：
+2. **禮貌頻率限制與退避重試（Polite Rate Limit & Exponential Backoff）**：
+   - 客戶端在發起每次 HTTP 連線時，嚴格維護至少 **2.5 秒**（`REQUEST_INTERVAL = 2.5`）之請求冷卻間隔，展現對中央社新聞伺服器之禮貌與善意，防止造成頻寬壓力。
+   - 若遇 HTTP 429 或 503 錯誤，會依標頭 `Retry-After`（支援秒數或 HTTP 日期）或指數退避（2.5 秒、5 秒、10 秒）自動重試至多 3 次。
+3. **每次分析請求上限（Request Budget）**：
+   - 每次分析嚴格限制至多發出 40 次 HTTP 請求（`cna_request_budget = 40`）。
+   - 若達請求上限，系統記錄警告：`中央社每次分析請求上限（40 次）已達；後續查證僅使用快取。`，後續查證直接依賴快取結果，不再發出外部請求。
+4. **短摘錄快取於 `data/research/` 與效期（Cache TTL）**：
    - 檢索與內文解析僅提取新聞標題與前兩段（至多 200 字）之純文字短摘錄，作為客觀事實判定依據。
    - 快取檔案存放於 `data/research/`（由 `.gitignore` 排除，絕不納入版本控制）。
+   - 搜尋結果快取效期為 **7 天**（`SEARCH_TTL`），文章內文短摘錄快取效期為 **30 天**（`ARTICLE_TTL`）。
    - 快取目錄設有自動淘汰機制，最多保留最近 **500 筆** JSON 快取檔案，過期或超額檔案自動清除。
-4. **網路斷線與連線失敗容錯（Fallback）**：
+5. **網路斷線與連線失敗容錯（Fallback）**：
    - 若遇網路不通、DNS 異常、請求逾時或中央社伺服器無回應，`CNAClient` 會捕捉 `OSError`、`ValueError` 與 `TimeoutError`，記錄異常原因並安全回傳空證據清單。
    - 系統記錄警告：`中央社暫時無法連線；台灣關聯改以原文、事實檔與已取得的證據查證。`，管線不會中斷，改以原文脈絡與本機現存事實清單完成後續分析。
 
@@ -414,24 +420,24 @@ author_email = "you@example.com"
 | 現象或錯誤代碼 | 常見原因 | 系統預設處理機制 | 建議處置方式 |
 | :--- | :--- | :--- | :--- |
 | **`User location is not supported`** | 模型 API 節點地理位置暫時性限制。 | 分類為 `location` 錯誤，立即切換至下一備援模型（如 `claude-sonnet-4-6`）。 | 檢查出站代理；通常由備援模型接手完成，無須干預。 |
-| **`gwg exit 75` / `no free account`** | 本機 `gwg` 帳號池暫無可用帳號。 | 分類為 `no_account`，指數退避等待至多 `no_account_wait_seconds`（預設 900 秒）。 | 執行 `gwg status` 檢查帳號狀態或登入新帳號。 |
+| **`gwg exit 75` / `no free account`** | 帳號池無可用帳號，或 Claude 5 小時額度耗盡使整帳號進入冷卻（連帶阻斷 Gemini 呼叫）。 | 分類為 `no_account`，指數退避等待至多 `no_account_wait_seconds`（預設 900 秒）；單元快取有效，重跑不重複扣額。 | 執行 `gwg status` 與 `gwg usage --json` 檢視配額重設時間；待重設後重新執行，或於 `config.toml` 將繁重階段暫時改為 Flash。 |
 | **配額耗盡 (`RESOURCE_EXHAUSTED` / 429)** | 模型達到帳號呼叫額度限制。 | 分類為 `quota`，立即切換至備援模型。 | 待配額重設後重新執行，已快取單元不重複扣額。 |
 | **Telegram `can't parse entities`** | HTML 標籤格式不符合 Telegram 規範。 | 自動捕捉錯誤，立即調用 `strip_tags()` 剝除標籤改以純文字降級重送。 | 自動自我修復，訊息保證送達，無須介入。 |
 | **缺少 Token 或 Chat ID** | 密鑰檔未建立或尚未執行配對。 | 拒絕發送並提示設定說明。 | 透過 `telegram-setup --test` 完成綁定。 |
 | **Telegraph `FLOOD_WAIT_N`** | Telegraph API 觸發頻率限制。 | 解析等待秒數並自動 sleep 退避重試（最多 5 次）。 | 自動自我恢復，無須手動干預。 |
 | **缺少或無效的 Telegraph Token** | 未設定或 Token 遭伺服器撤銷。 | 自動嘗試重新註冊帳號並寫入密鑰檔。 | 執行 `telegraph-setup --force` 強制重新註冊。 |
 | **Telegraph 頁面超過容量上限** | 單篇內容加上導覽超過 60 KB 上限。 | 本地排版階段預先檢驗並中止，避免建立半殘頁面。 | 在 `config.toml` 中調高 `[telegraph] page_limit_bytes`（上限 64,000）或調整摘要深度。 |
-| **私人網站發布失敗 (SSH / rsync)** | SSH 逾時、未連上指定網路或目錄權限錯誤。 | 記錄警告，摘要訊息自動省略網站連結，自動改傳單檔 HTML 報告備援。 | 檢查 SSH 連線、`ssh_host` 與金鑰設定；單檔報告保證讀者取得內容。 |
+| **私人網站發布失敗 (SSH / tar)** | 本機缺 ssh/tar、遠端缺 tar、SSH 逾時或目錄權限錯誤。 | 記錄警告，摘要訊息自動省略網站連結，自動改傳單檔 HTML 報告備援。 | 檢查本機與遠端 tar/ssh 安裝、SSH 連線、`ssh_host` 與金鑰設定；單檔報告保證讀者取得內容。 |
 | **Telegram 內建瀏覽器無法登入網站** | Telegram 內建瀏覽器不支援 HTTP Basic Auth 彈窗。 | 屬於 Telegram 應用程式限制。 | 點擊瀏覽器選單選擇「在預設瀏覽器中開啟」（Safari / Chrome）即可正常輸入帳密。 |
 | **GitHub 備份 push 失敗** | Git 權限不符、儲存庫未建立或網路問題。 | 記錄警告（`網站備份失敗`），導讀主流程持續完成。 | 檢查 GitHub SSH 金鑰與儲存庫權限；確保備份儲存庫設定為 Private。 |
 | **英文選文或學習指南失敗** | 選文或指南模型呼叫逾時或格式錯誤。 | 記錄警告（`英文選文失敗`），導讀主流程持續完成。 | 檢查模型配額與網路；必要時加上 `--reanalyze` 重新執行。 |
 | **`--pages-only` 於 messages 模式失敗** | 設定檔為 `delivery = "messages"` 時執行了 `--pages-only`。 | 輸出提示並以 exit code 2 退出。 | 確認 `delivery = "telegraph"`；若在 messages 模式下需重送請用 `--force`。 |
 | **執行鎖已被占用 (`AlreadyRunning`)** | 同一時間已有另一個實例正在運行。 | 捕捉非阻塞檔案鎖失敗並安全退出（exit code 0）。 | 正常保護機制；若程序卡死，使用 `ps aux \| grep econ-digest` 確認。 |
-| **`edit` 或 `ground` 階段逾時** | Opus 4.6 深度思考或中央社取證耗時超出限額。 | 達 600 秒逾時後自動切換至 Gemini 3.8 Flash 備援接手。 | 確認 `stage_timeout_seconds` 未被誤設過低；檢查網路連線。 |
+| **`edit` 或 `ground` 階段逾時** | `edit`（預設 900 秒）批次編修或 `ground`（預設 600 秒，`ground_queries` 亦同）取證比對耗時超出門檻。 | 達逾時門檻後，`edit` 自動切換至 Claude Sonnet 4.6 備援，`ground` 自動切換至 Gemini 3.8 Flash 備援。 | 確認 `stage_timeout_seconds` 未被誤設過低；檢查網路連線。 |
 | **中央社暫時無法連線** | 中央社網站維護、DNS 異常或連線逾時。 | 記錄警告，自動降級以原文、事實檔與已快取證據查證，主流程順利完成。 | 屬暫時性外部網路問題，無須介入；管線保證閱讀內容產出。 |
-| **標題與要聞編修驗證退回** | 模型改寫未符合字數、標點符號規範或實體名稱守衛。 | 逐欄位安全驗證，不合規條目自動退回原文字，記錄警告。 | 安全保護機制生效，保證報告標題結構完整不損毀，無須緊急處置。 |
+| **標題與要聞編修驗證退回** | 模型改寫未符合字數規範、標點符號（如一句話重點非單句、非「。」結尾、含全形空格或問驚號、重複標題）或實體名稱守衛。 | 逐欄位安全驗證，不合規條目自動退回原文字，記錄警告。 | 安全保護機制生效，保證報告標題結構完整不損毀，無須緊急處置。 |
 | **收到事實檔更新提醒 (`fact_alerts`)** | 每週比對發現中央社最新要聞與 `taiwan.md` 存在潛在差異。 | 於私人聊天室發送 `⚠️ 台灣事實檔可能需要更新` 警報（至多 5 則，附中央社連結）。 | 點擊連結確認屬實後，編輯 `src/econ_digest/facts/taiwan.md` 並 commit/push。 |
-| **每週管線執行時間顯著拉長** | 引入 Opus 4.6 (thinking) 與外部取證，模型傳輸時間達 15–25 分鐘。 | 正常架構行為，單期總耗時約 20–35 分鐘。 | 屬預期現象；確認定時器與系統服務逾時門檻充足（建議 >= 40 分鐘）。 |
+| **每週管線執行時間顯著拉長** | 外部取證比對與深度解析模型運算。在 Gemini Flash 上一個編修區塊約 70–250 秒，Opus 上約 240–560 秒。 | 正常架構行為，單期總耗時約 20–35 分鐘。 | 屬預期現象；確認定時器與系統服務逾時門檻充足（建議 >= 40 分鐘）。 |
 
 ---
 
@@ -447,9 +453,29 @@ author_email = "you@example.com"
 
 ### 2. gwg exit 75 / no free account
 
-- **詳細成因**：本機 `gwg` 帳號池中的免費用戶達到短暫冷卻上限，子程序以結束代碼 `75` 退出。
-- **系統處理機制**：系統以指數退避（30 秒、60 秒、120 秒…）在 `no_account_wait_seconds`（預設 900 秒）內持續等待釋出帳號。
-- **處置建議**：若等待超時，執行 `gwg status` 檢查帳號狀態。
+- **現象描述**：所有帳號皆回報結束代碼 `75`（`gwg exit 75`）或 `no free account`，且不僅 Claude 階段無法呼叫，連 Gemini 階段也一併失敗。
+- **詳細成因**：當 Claude 5 小時額度耗盡時，`gwg` 會讓整個帳號進入冷卻狀態（cooldown），連帶阻斷該帳號上的 Gemini 呼叫，直到額度桶重設時點。
+- **系統內部行為**：
+  - 管線捕捉後歸類為 `no_account`，並以指數退避（30 秒、60 秒、120 秒…）在 `no_account_wait_seconds`（預設 900 秒）內持續重試等待釋出可用帳號。
+  - 單元級快取（Unit-level cache）保證已完成之單元持續有效，後續重新執行時絕不重複消耗模型額度。
+- **處置建議**：
+  1. 檢查帳號狀態與額度重設時點：
+     ```sh
+     gwg status
+     gwg usage --json
+     ```
+     透過 `gwg usage --json` 檢視各帳號之 5 小時與每週配額用量及精確重設時間。
+  2. 待額度重設後重新執行，已快取單元不重複扣額：
+     ```sh
+     .venv/bin/econ-digest send
+     ```
+  3. 若急需產出且不想等待，可暫時於本地 `config.toml` 的 `[llm.models]` 中將繁重階段導向 Flash：
+     ```toml
+     [llm.models]
+     summarize_a = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
+     ground = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
+     facts = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
+     ```
 
 ---
 
@@ -530,22 +556,26 @@ author_email = "you@example.com"
 
 ---
 
-### 12. 私人網站發布與 SSH / rsync 失敗排查
+### 12. 私人網站發布與 SSH / tar 失敗排查
 
 - **詳細成因**：
-  1. SSH 金鑰未配置免密碼登入或逾時（`ssh_timeout_seconds`）。
-  2. 伺服器端目錄（`remote_dir`）權限不足，rsync 無法寫入。
-  3. 當前設備處於外部未受信任網路，無法連線至內網主機。
+  1. 本機缺少 `ssh` 或 `tar`，或遠端伺服器未安裝 `tar`（`command -v tar` 預檢失敗）。
+  2. SSH 金鑰未配置免密碼登入或逾時（`ssh_timeout_seconds`）。
+  3. 伺服器端目錄（`remote_dir`）權限不足，無法建立 `.incoming` 暫存目錄或完成原子替換。
+  4. 當前設備處於外部未受信任網路，無法連線至指定主機。
 - **系統內部行為**：
-  - `publish_site()` 捕捉 `subprocess.SubprocessError` 或 `OSError`，記錄警告：`私人網站發布失敗；改用單檔 HTML 報告。`
+  - 系統在發布前會先驗證本機具備 `ssh` 與 `tar`，並透過 SSH 於遠端伺服器執行 `command -v tar` 預檢。
+  - 將本期發布目錄以 tar 封裝透過 SSH 串流傳輸至遠端暫存目錄（`.incoming/`）解開，並以原子替換（atomic swap）方式部署（舊版本暫存為備份，若替換失敗自動還原；替換成功後清除備份）。
+  - 若遇傳輸中斷、預檢失敗或替換異常，`publish_site()` 捕捉 `PublishError`，記錄警告：`私人網站發布失敗；改用單檔 HTML 報告。`（並附帶 stderr 尾部除錯資訊）。
   - 傳送訊息時 `site_url` 設為 `None`，摘要訊息自動拿掉「🔒 圖文完整版」連結。
   - 自動啟用備援機制，將單檔完整 HTML 報告（`report.html`）作為附件檔案發送至 Telegram 私人聊天室。
 - **維運處置**：
-  1. 測試手動連線：
+  1. 測試本機與遠端工具及連線：
      ```sh
-     ssh -o BatchMode=yes my-vm "mkdir -p /var/www/site"
+     which tar
+     ssh -o BatchMode=yes your-server "command -v tar && mkdir -p /var/www/site"
      ```
-  2. 確認遠端目錄擁有者與權限（建議設為 Web 伺服器使用者或目前登入使用者）。
+  2. 確認遠端目錄擁有者與權限（確保登入使用者具備寫入權限）。
   3. 若網路環境暫時無法連線至 Web 伺服器，系統的單檔報告備援機制可確保閱讀體驗不受影響。
 
 ---
@@ -599,33 +629,34 @@ author_email = "you@example.com"
 
 ---
 
-### 16. edit 與 ground 階段耗時與 600 秒逾時處理
+### 16. edit 與 ground 階段耗時與逾時處理
 
 - **現象描述**：日誌中顯示 `edit` 或 `ground` 階段持續運行數分鐘，或偶發逾時錯誤（`timeout`）。
 - **成因解析**：
-  1. Claude Opus 4.6 (thinking) 具備深度鏈式思考（Chain-of-Thought）機制，耗費較多時間進行邏輯反思與雙子句結構驗證。
-  2. `edit` 階段每批最多處理 20 項（15 KB），需逐項核對數字與實體詞彙；`ground` 階段則需結合中央社外部證據與事實清單進行嚴謹比對。
+  1. `edit` 階段每批至多處理 10 項（9,000 bytes），需逐項核對數字、實體詞彙並進行自然繁體新聞風格編修；預設主要模型為 Gemini 3.8 Flash，備援模型為 Claude Sonnet 4.6。實測在 Gemini Flash 上一個編修區塊約需 70–250 秒、消耗 42–51k tokens（在 Opus 上則曾需 240–560 秒）。
+  2. `ground` 階段（及 `ground_queries` 階段）使用具深度思考之 Claude Opus 4.6 (thinking)，結合中央社外部客觀證據與台灣事實清單進行嚴謹比對。
 - **系統內部行為**：
-  - 系統於 `config.toml` 預設提供階段專屬逾時配置：`stage_timeout_seconds = { edit = 600, ground = 600 }`。
-  - 若在 600 秒內未完成或發生異常，LLM 客戶端自動切換至備援模型（Gemini 3.8 Flash）接手完成。
+  - 系統於 `config.toml` 預設提供階段專屬逾時配置：`stage_timeout_seconds = { edit = 900, ground = 600 }`。`ground_queries` 共用 `ground` 之 600 秒逾時設定，其餘階段維持全域 `call_timeout_seconds = 300` 秒。
+  - 若逾時或異常，LLM 客戶端自動切換至各階段定義之備援模型（`edit` 切換至 Claude Sonnet 4.6，`ground` 切換至 Gemini 3.8 Flash）接手完成。
 - **維運處置**：
-  - 此為預期的深度推理耗時，無須過度干預。
-  - 若自訂 `config.toml`，請務必保留 `edit` 與 `ground` 至少 600 秒之逾時門檻，切勿將其設得過短。
+  - 此為預期的逐項編修與深度查證耗時，無須過度干預。
+  - 若自訂 `config.toml`，請務必保留 `edit`（至少 900 秒）與 `ground`（至少 600 秒）之充足逾時門檻，切勿將其設得過短。
 
 ---
 
 ### 17. 中央社新聞檢索異常與快取維護
 
-- **現象描述**：日誌中出現警告：`中央社暫時無法連線；台灣關聯改以原文、事實檔與已取得的證據查證。`
+- **現象描述**：日誌中出現警告：`中央社暫時無法連線；台灣關聯改以原文、事實檔與已取得的證據查證。` 或 `中央社每次分析請求上限（40 次）已達；後續查證僅使用快取。`
 - **成因解析**：
-  1. 中央社網站進行維護、DNS 解析延遲或本機對外連線發生短暫不穩定。
-  2. 搜尋端點伺服器回應逾時（超過 15 秒）。
+  1. 中央社網站進行維護、DNS 解析延遲、連線逾時（超過 15 秒），或短時間內發起過多請求觸發 HTTP 429 / 503 頻率限制。
+  2. 單次管線執行累計請求次數達到 40 次安全上限（`cna_request_budget = 40`）。
 - **系統內部行為**：
-  - `CNAClient` 捕捉連線例外並記錄於 `errors` 清單中，安全回傳空證據清單，**絕不引發程式崩潰**。
-  - 台灣關聯查證單元（`ground_digest`）自動降級改以原文脈絡、本機 `taiwan.md` 事實清單與 `data/research/` 既有快取完成分析。
+  - 客戶端保持至少 2.5 秒請求冷卻間隔；遇到 HTTP 429 或 503 時，依 `Retry-After` 標頭或指數退避（2.5 秒、5 秒、10 秒）自動重試至多 3 次。
+  - 當請求數達到 40 次上限，或連線發生例外時，`CNAClient` 安全記錄原因，不引發程式崩潰。
+  - 台灣關聯查證單元（`ground_digest`）自動改以原文脈絡、本機 `taiwan.md` 事實清單與 `data/research/` 既有快取完成分析。
 - **維運處置**：
-  - 通常為暫時性網路抖動，導讀生成會平順完成，無須手動介入。
-  - `data/research/` 快取目錄由系統自動維護，僅留存純文字短摘錄，上限 500 筆自動循環覆蓋，不會無限制佔用磁碟。
+  - 通常為暫時性網路抖動或配額保護，導讀生成會平順完成，無須手動介入。
+  - `data/research/` 快取目錄由系統自動維護（搜尋結果 7 天、文章短摘錄 30 天，上限 500 筆循環覆蓋），不會無限制佔用磁碟。
 
 ---
 
@@ -657,13 +688,12 @@ author_email = "you@example.com"
 
 - **現象描述**：日誌中出現警告：`標題與要聞編修失敗，保留原文字。`
 - **成因解析**：
-  - 模型在 `edit` 階段產出之改寫標題未通過嚴格語法或實體守衛：
-    1. 字數不符 8–26 字規範。
-    2. 出現問號「？」、逗號「，」或非發言引述之冒號「：」。
-    3. 改寫後數字與原文數字不一致。
-    4. 出現原文未提及且不在標準新聞詞彙表內的陌生專有名詞（實體名稱閘道攔截）。
+  - 模型在 `edit` 階段產出之改寫標題、一句話重點（`headline_zh`）或要聞條目未通過嚴格語法、長度或實體守衛：
+    1. **新聞標題規範**：字數須介於 8–26 字；不得包含問號「？」、逗號「，」或非發言引述之冒號「：」；改寫後數字須與原文數字一致；不得出現原文未提及且不在標準新聞詞彙表內的陌生專有名詞（實體名稱閘道攔截）。
+    2. **一句話重點規範（`headline_zh`）**：必須為單一自然句，長度 30–60 字（中文字數）且以「。」結尾（全句僅能包含一個句號「。」）；不得重複中文標題內容；不得包含全形空格（`\u3000`）、換行符號、問號（`?`、`？`）或驚嘆號（`!`、`！`）；且必須忠實於輸入內容。
+    3. **要聞條目規範**：各條要聞長度須符合字數範圍，數字與關鍵實體須完全對齊輸入內容。
 - **系統內部行為**：
   - `editor.py` 實作「逐欄位安全退回機制」（Field-by-field safe fallback）。
-  - 若特定文章標題或要聞條目未通過驗證，系統自動退回採用前一階段之原文字，保證不產出任何毀損或格式異常之內容。
+  - 若特定文章標題、一句話重點或要聞條目未通過驗證，系統自動退回採用前一階段之原文字（保留原摘要文字），保證不產出任何毀損或格式異常之內容。
 - **維運處置**：
   - 屬於正常的品質守衛保護機制，整期導讀不受影響，無須緊急處置。
