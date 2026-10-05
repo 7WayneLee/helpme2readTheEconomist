@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from html import escape
+import os
 from pathlib import Path
 from zipfile import ZIP_STORED, ZipFile
 
@@ -10,6 +11,22 @@ import pytest
 
 from econ_digest.epub_parser import parse_epub
 from econ_digest.models import Article, Issue
+
+
+@pytest.fixture(autouse=True)
+def disable_live_gwg(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A newly implemented command must never spend live quota during pytest."""
+    if os.environ.get("ECON_DIGEST_LIVE_GWG") == "1":
+        return
+    directory = tmp_path_factory.mktemp("quota-guard")
+    executable = directory / "gwg"
+    executable.write_text(
+        '#!/bin/sh\n'
+        'printf \'%s\\n\' \'{"status":"ERROR","error":"live gwg disabled in tests","response":""}\'\n'
+        'exit 2\n', encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    monkeypatch.setenv("PATH", str(directory) + os.pathsep + os.environ.get("PATH", ""))
 
 
 @pytest.fixture

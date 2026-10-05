@@ -172,7 +172,15 @@ def test_parse_and_signals_commands(cli_config: Config, synthetic_issue: Issue, 
     assert "提及次數：2；詞彙：Taiwan, TSMC" in output
 
 
-def test_unimplemented_command_and_global_options(cli_config: Config, capsys: pytest.CaptureFixture[str]) -> None:
+def test_unimplemented_command_and_global_options(cli_config: Config, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch) -> None:
+    original = cli.importlib.import_module
+
+    def import_module(name: str) -> Any:
+        if name == "econ_digest.commands.analyze":
+            raise ModuleNotFoundError("Synthetic missing command", name=name)
+        return original(name)
+
+    monkeypatch.setattr(cli.importlib, "import_module", import_module)
     assert cli.main(["--config", "synthetic.toml", "-v", "analyze"]) == 2
     assert "此功能尚未實作" in capsys.readouterr().err
     assert "（尚未實作）" in cli.build_parser().format_help()

@@ -1,0 +1,193 @@
+"""Shape, depth, and source-fidelity checks used by the client's repair path."""
+
+from __future__ import annotations
+
+import re
+from typing import Any
+
+from ..config import EnglishConfig
+from ..models import Article
+
+_CJK = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff]")
+_PUNCTUATION = str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"',
+                            "–": "-", "—": "-", "−": "-", "\u00ad": ""})
+
+
+def text(value: Any, field: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{field} must be a nonempty string")
+    return value
+
+
+def strings(value: Any, field: str, minimum: int, maximum: int) -> list[str]:
+    if not isinstance(value, list) or not minimum <= len(value) <= maximum:
+        raise ValueError(f"{field} requires {minimum}–{maximum} items")
+    for item in value:
+        text(item, field)
+    return value
+
+
+def object_items(data: dict[str, Any], key: str, ids: set[str]) -> list[dict[str, Any]]:
+    items = data.get(key)
+    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+        raise ValueError(f"{key} must be a list of objects")
+    found = [item.get("article_id") for item in items]
+    if any(not isinstance(identifier, str) for identifier in found) or len(found) != len(ids) or set(found) != ids:
+        raise ValueError(f"{key}: every article_id must occur exactly once: {sorted(ids)}")
+    return items
+
+
+def canonical_english(value: str) -> str:
+    return " ".join(value.translate(_PUNCTUATION).split())
+
+
+def source_contains(article: Article, excerpt: str, *, trimmed: bool = False) -> bool:
+    source = canonical_english("\n".join(article.paragraphs))
+    if not trimmed:
+        return canonical_english(excerpt) in source
+    parts = [canonical_english(part).strip() for part in re.split(r"…|\.{3}", excerpt)]
+    parts = [part for part in parts if part]
+    if not parts:
+        return False
+    offset = 0
+    for part in parts:
+        position = source.find(part, offset)
+        if position < 0:
+            return False
+        offset = position + len(part)
+    return True
+
+
+def chinese_length(value: Any) -> int:
+    if isinstance(value, str):
+        return len(_CJK.findall(value))
+    if isinstance(value, list):
+        return sum(chinese_length(item) for item in value)
+    if isinstance(value, dict):
+        return sum(chinese_length(item) for key, item in value.items()
+                   if key not in {"article_id", "tier", "en", "model"})
+    return 0
+
+
+def length(value: Any, field: str, minimum: int, maximum: int) -> None:
+    count = chinese_length(value)
+    if not minimum <= count <= maximum:
+        raise ValueError(f"{field}: {count} Chinese characters; expected approximately {minimum}–{maximum}")
+
+
+def validate_argument(value: Any, *, tier: str) -> None:
+    if not isinstance(value, dict):
+        raise ValueError("argument must be an object")
+    text(value.get("claim"), "argument.claim")
+    text(value.get("conclusion"), "argument.conclusion")
+    strings(value.get("evidence"), "argument.evidence", 3 if tier == "A" else 2, 6 if tier == "A" else 4)
+    strings(value.get("counterpoints"), "argument.counterpoints", 1 if tier == "A" else 0, 3 if tier == "A" else 2)
+
+
+def validate_summary(item: dict[str, Any], article: Article, tier: str, *, leader: bool = False) -> None:
+    headline = text(item.get("headline_zh"), "headline_zh")
+    if tier != "E" and chinese_length(headline) > 50:
+        raise ValueError("headline_zh exceeds 50 Chinese characters")
+    if tier == "A":
+        length(text(item.get("background"), "background"), "background", 100, 330)
+        structure = strings(item.get("structure"), "structure", 4, 8)
+        for part in structure:
+            match = re.match(r"^第\s*(\d+)(?:\s*[–—−\-~～至]\s*(\d+))?\s*段[：:]", part)
+            if not match or not 1 <= int(match[1]) <= int(match[2] or match[1]) <= len(article.paragraphs):
+                raise ValueError("structure must start with a valid paragraph range, e.g. 第 1–2 段：")
+        starts = [int(re.match(r"^第\s*(\d+)", part)[1]) for part in structure]
+        if starts != sorted(starts):
+            raise ValueError("structure must follow paragraph order")
+        validate_argument(item.get("argument"), tier=tier)
+        strings(item.get("key_data"), "key_data", 3, 6)
+        quotes = item.get("quotes")
+        if not isinstance(quotes, list) or any(not isinstance(quote, dict) for quote in quotes):
+            raise ValueError("quotes must be a list of objects")
+        kept = []
+        for quote in quotes:
+            en = text(quote.get("en"), "quotes.en")
+            text(quote.get("zh"), "quotes.zh")
+            if source_contains(article, en):
+                kept.append(quote)
+        item["quotes"] = kept
+        if not 2 <= len(kept) <= 4:
+            raise ValueError("quotes requires 2–4 verbatim source quotations; invented quotes were removed")
+        stance = text(item.get("stance"), "stance")
+        if not stance.startswith("立場分析"):
+            raise ValueError("stance must be explicitly labelled 立場分析")
+        length(stance, "stance", 65, 280)
+        strings(item.get("taiwan_implications"), "taiwan_implications", 2, 4)
+        strings(item.get("further_questions"), "further_questions", 1, 2)
+        length(item, "A total", 800, 2700)
+    elif tier == "B":
+        strings(item.get("key_points"), "key_points", 4, 6)
+        validate_argument(item.get("argument"), tier=tier)
+        strings(item.get("taiwan_implications"), "taiwan_implications", 1, 3)
+        length(item, "B total", 400, 1250)
+    elif tier == "C":
+        strings(item.get("key_points"), "key_points", 3, 5)
+        length(item, "C total", 165, 550)
+    elif tier == "D":
+        summary = text(item.get("summary_zh"), "summary_zh")
+        if not 2 <= len(re.findall(r"[。！？](?:[」』])?", summary)) <= 3:
+            raise ValueError("D summary_zh requires 2–3 sentences")
+        length(summary, "summary_zh", 50, 210)
+    elif tier == "E":
+        length(headline, "headline_zh", 20, 85)
+    else:
+        raise ValueError(f"Unsupported summary tier: {tier}")
+    if leader:
+        stance = text(item.get("leader_stance"), "leader_stance")
+        if not stance.startswith("社論主張："):
+            raise ValueError("leader_stance must start with 社論主張：")
+        if not 2 <= len(re.findall(r"[。！？]", stance)) <= 3:
+            raise ValueError("leader_stance requires 2–3 sentences")
+
+
+def validate_guide(data: dict[str, Any], article: Article, config: EnglishConfig) -> None:
+    if not isinstance(data.get("cefr"), str) or data["cefr"] not in {"A2", "B1", "B2", "C1", "C2"}:
+        raise ValueError("cefr must be A2–C2")
+    length(text(data.get("pre_reading_zh"), "pre_reading_zh"), "pre_reading_zh", 100, 330)
+    for key, count in (("vocabulary", config.vocab_count), ("phrases", config.phrase_count)):
+        items = data.get(key)
+        if not isinstance(items, list) or len(items) != count or any(not isinstance(item, dict) for item in items):
+            raise ValueError(f"{key} requires exactly {count} objects")
+        terms: list[str] = []
+        for item in items:
+            term = text(item.get("word" if key == "vocabulary" else "phrase"), key)
+            terms.append(term.casefold())
+            if key == "vocabulary":
+                if not isinstance(item.get("pos"), str) or item["pos"] not in {"n.", "v.", "adj.", "adv.", "phr."}:
+                    raise ValueError("vocabulary.pos must be n./v./adj./adv./phr.")
+                text(item.get("note_zh"), "vocabulary.note_zh")
+            text(item.get("meaning_zh"), f"{key}.meaning_zh")
+            example = text(item.get("example_en"), f"{key}.example_en")
+            if not source_contains(article, example, trimmed=True):
+                raise ValueError(f"{key}.example_en must occur verbatim in the source")
+            if len(example.split()) > 42:
+                raise ValueError(f"{key}.example_en must be trimmed to approximately 40 words")
+            if not re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", canonical_english(example), re.I):
+                raise ValueError(f"{key}.example_en must contain {term}")
+        if len(set(terms)) != len(terms):
+            raise ValueError(f"{key} must not repeat terms")
+    sentences = data.get("sentences")
+    if not isinstance(sentences, list) or not 2 <= len(sentences) <= 3 or any(not isinstance(item, dict) for item in sentences):
+        raise ValueError("sentences requires 2–3 objects")
+    for item in sentences:
+        sentence = text(item.get("sentence_en"), "sentence_en")
+        if not source_contains(article, sentence):
+            raise ValueError("sentence_en must occur verbatim in the source")
+        text(item.get("breakdown_zh"), "breakdown_zh")
+        text(item.get("translation_zh"), "translation_zh")
+    strings(data.get("writing_notes_zh"), "writing_notes_zh", 1, 2)
+    quiz = data.get("quiz")
+    if not isinstance(quiz, list) or len(quiz) != 3 or any(not isinstance(item, dict) for item in quiz):
+        raise ValueError("quiz requires 3 objects")
+    for item in quiz:
+        question = text(item.get("question"), "quiz.question")
+        if _CJK.search(question):
+            raise ValueError("quiz.question must be in English")
+        answer = text(item.get("answer"), "quiz.answer")
+        match = re.search(r"第\s*(\d+)\s*段|\[(\d+)\]", answer)
+        if not match or not 1 <= int(match[1] or match[2]) <= len(article.paragraphs):
+            raise ValueError("quiz.answer must cite a valid paragraph number")

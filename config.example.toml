@@ -28,6 +28,8 @@ brief = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 本週要聞
 english = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 英語學習
 
 [tiers]
+cover_companion_min = "B" # 封面社論對應報導至少達到的深度
+leader_companion_min = "C" # 其他社論對應報導至少達到的深度
 taiwan = { "1" = "A", "2" = "B", "3" = "C" } # 台灣相關程度對應摘要深度
 category = { "intl.us" = "C", "intl.china" = "C", "intl.asia" = "D", "intl.europe" = "D", "finance" = "D", "tech" = "D", "intl.other" = "E", "science" = "E", "culture" = "E" } # 一般分類的深度
 min_tier_by_kind = { briefing = "C" } # 特定文章種類至少達到的深度

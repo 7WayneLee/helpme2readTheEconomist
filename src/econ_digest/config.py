@@ -59,6 +59,8 @@ class LLMConfig:
 
 @dataclass(frozen=True)
 class TiersConfig:
+    cover_companion_min: str = "B"
+    leader_companion_min: str = "C"
     taiwan: dict[str, str] = field(default_factory=lambda: {"1": "A", "2": "B", "3": "C"})
     category: dict[str, str] = field(default_factory=lambda: {
         "intl.us": "C", "intl.china": "C", "intl.asia": "D", "intl.europe": "D",
@@ -180,6 +182,9 @@ def _build(cls: type[T], data: dict[str, Any], prefix: str, base_dir: Path) -> T
 
 
 def _validate(config: Config) -> None:
+    for name in ("cover_companion_min", "leader_companion_min"):
+        if getattr(config.tiers, name) not in TIER_ORDER:
+            _fail(f"tiers.{name}", "必須是 A、B、C、D 或 E")
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", config.source.repo):
         _fail("source.repo", "必須是 owner/repo 格式")
     if config.source.folder.startswith("/") or ".." in config.source.folder.split("/"):
