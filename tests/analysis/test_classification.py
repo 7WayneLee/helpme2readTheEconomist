@@ -50,6 +50,59 @@ def test_passing_mention_and_implicit_relevance() -> None:
     validate_classification({"articles": [passing]}, {"a1"})
 
 
+@pytest.mark.parametrize('body,kind,level,link', [
+    ('The presidential hotline was established in 1998 after the Taiwan Strait crisis of 1996.',
+     'substantive', 3, '原文回顧 1996 年台海危機後，美中在 1998 年建立元首熱線。'),
+    ('Taiwan changed its industrial policy. Its experience provides a comparison for this reform.',
+     'substantive', 3, '原文以台灣產業政策作為改革的比較。'),
+    ('The new policy requires Taiwan to take part in the talks.',
+     'substantive', 2, '原文指出新政策要求台灣參與談判。'),
+    ('The party sends messages to Taiwan about a shared cultural heritage.',
+     'substantive', 3, '原文報導中共向台灣傳達共享文化傳承的政治訊息。'),
+    ('The survey covered India, Taiwan, Japan and France.',
+     'incidental', 0, None),
+    ('A Taiwanese study is cited as an example in a report on Indian financial astrology.',
+     'incidental', 0, None),
+    ('A poll measures attitudes towards China across Latin America.',
+     'none', 0, None),
+    ('A new export policy restricts chip sales by all firms to China.',
+     'none', 3, '（推論）原文的晶片出口限制適用所有廠商，台灣廠商對中國的銷售也在管制範圍。'),
+])
+def test_article_discussion_and_incidental_mentions(analysis_config, body, kind, level, link):
+    source = issue([article('a1', paragraphs=[body])])
+    unit = classify_units(source, analysis_config)[0]
+    item = {**valid(), 'taiwan_level': level, 'mentions_taiwan': kind != 'none',
+            'taiwan_mention_kind': kind, 'taiwan_evidence': body if kind != 'none' or level else None,
+            'taiwan_link': link}
+    unit.validate({'articles': [item]})
+    if kind == 'substantive':
+        with pytest.raises(ValueError, match='Substantive'):
+            unit.validate({'articles': [{**item, 'taiwan_level': 0, 'taiwan_link': None}]})
+        with pytest.raises(ValueError, match='without speculation'):
+            unit.validate({'articles': [{**item, 'taiwan_link': '（推論）' + link}]})
+    if kind == 'incidental':
+        with pytest.raises(ValueError, match='incidental'):
+            unit.validate({'articles': [{**item, 'taiwan_level': 3, 'taiwan_link': '不能強拉關聯。'}]})
+    if kind != 'none' or level:
+        with pytest.raises(ValueError, match='verbatim'):
+            unit.validate({'articles': [{**item, 'taiwan_evidence': 'An invented source sentence.'}]})
+
+
+def test_source_assessment_required_and_mentions_consistent(analysis_config):
+    unit = classify_units(issue([article('a1')]), analysis_config)[0]
+    with pytest.raises(ValueError, match='taiwan_mention_kind'):
+        unit.validate({'articles': [valid()]})
+    with pytest.raises(ValueError, match='must agree'):
+        unit.validate({'articles': [{**valid(), 'taiwan_mention_kind': 'substantive'}]})
+
+
+@pytest.mark.parametrize('kind', [None, [], {}])
+def test_malformed_source_assessment_is_repairable(analysis_config, kind):
+    unit = classify_units(issue([article('a1')]), analysis_config)[0]
+    with pytest.raises(ValueError, match='taiwan_mention_kind'):
+        unit.validate({'articles': [{**valid(), 'taiwan_mention_kind': kind}]})
+
+
 @pytest.mark.parametrize("companions", [["a1", "a1"], ["l1", None], ["absent", None]])
 def test_pair_validation(companions: list[str | None]) -> None:
     data = {"pairs": [{"article_id": f"l{i}", "companion_id": companion} for i, companion in enumerate(companions, 1)]}

@@ -10,7 +10,7 @@ from ..models import Article, Classification, Issue
 from ..signals import find_taiwan_signals
 from ..taxonomy import CATEGORIES, TAIWAN_LEVELS, TAIWAN_LEVEL_DEFINITIONS, TIER_ORDER, assign_tier
 from .prompts import Unit, first_words, make_unit, prompt_json, split_units
-from .validation import object_items, text
+from .validation import canonical_english, object_items, text
 
 FIXED_TITLES = {"cartoon": "漫畫", "indicators": "經濟與金融指標",
                 "world_politics": "本週政治要聞", "world_business": "本週商業要聞"}
@@ -44,7 +44,8 @@ def classification_payload(article: Article) -> dict[str, Any]:
             "snippets": signals.snippets[:5]}
 
 
-def validate_classification(data: dict[str, Any], ids: set[str]) -> None:
+def validate_classification(data: dict[str, Any], ids: set[str],
+                            articles: dict[str, Article] | None = None) -> None:
     for item in object_items(data, "articles", ids):
         level = item.get("taiwan_level")
         if type(level) is not int or level not in {0, 1, 2, 3}:
@@ -58,6 +59,35 @@ def validate_classification(data: dict[str, Any], ids: set[str]) -> None:
             text(item.get("taiwan_link"), "taiwan_link (required for level >= 1)")
         elif item.get("taiwan_link") is not None and not isinstance(item.get("taiwan_link"), str):
             raise ValueError("taiwan_link must be a string or null")
+        if articles is not None:
+            kind = item.get("taiwan_mention_kind")
+            if not isinstance(kind, str) or kind not in {"none", "incidental", "substantive"}:
+                raise ValueError("taiwan_mention_kind must be none, incidental, or substantive")
+            if item["mentions_taiwan"] != (kind != "none"):
+                raise ValueError("mentions_taiwan must agree with taiwan_mention_kind")
+            if kind == "substantive" and level == 0:
+                raise ValueError("Substantive article discussion of Taiwan requires level 1–3")
+            if kind == "incidental" and level != 0:
+                raise ValueError("An incidental Taiwan mention stays at level 0")
+            if kind != "none" or level:
+                excerpt = text(item.get("taiwan_evidence"), "taiwan_evidence")
+                article = articles[item["article_id"]]
+                source = canonical_english("\n".join([article.title, article.rubric or "", *article.paragraphs]))
+                if canonical_english(excerpt) not in source:
+                    raise ValueError("taiwan_evidence must be a verbatim article excerpt")
+            if kind == "substantive" and "（推論）" in item["taiwan_link"]:
+                raise ValueError("Substantive Taiwan links must state the article's facts without speculation")
+            if kind == "none" and level and not item["taiwan_link"].startswith("（推論）"):
+                raise ValueError("Taiwan links without an article mention must label their concrete inference")
+
+
+def article_taiwan_link(classification: Classification) -> str | None:
+    """A substantive source discussion survives missing external evidence."""
+    link = classification.taiwan_link
+    if (classification.taiwan_level and classification.mentions_taiwan and link
+            and not any(marker in link for marker in ("（推論）", "待確認", "暫定", "未查證"))):
+        return link
+    return None
 
 
 def classify_units(issue: Issue, config: Config) -> list[Unit]:
@@ -66,7 +96,7 @@ def classify_units(issue: Issue, config: Config) -> list[Unit]:
     def build(batch: list[Article]) -> Unit:
         ids = {article.id for article in batch}
         return make_unit("classify", issue.issue_date, sorted(ids), config.llm.models.classify,
-                         lambda data: validate_classification(data, ids),
+                         lambda data: validate_classification(data, ids, {article.id: article for article in batch}),
                          levels=prompt_json({0: "無實質台灣關聯", **{
                              level: TAIWAN_LEVELS[level] + "：" + definition
                              for level, definition in TAIWAN_LEVEL_DEFINITIONS.items()}}),

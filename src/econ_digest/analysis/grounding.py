@@ -15,6 +15,7 @@ from ..research.cna import CNAClient, Evidence, cna_url
 from ..signals import find_taiwan_signals
 from ..taxonomy import assign_tier
 from .cache import UnitRunner
+from .classification import article_taiwan_link
 from .prompts import Unit, make_unit, prompt_json, split_units
 from .validation import chinese_length, object_items
 
@@ -57,7 +58,8 @@ def _statement(value: Any, evidence_ids: set[str]) -> dict[str, Any] | None:
     return {"text_zh": text.strip(), "basis": list(dict.fromkeys(basis))}
 
 
-def validate_grounding(data: dict[str, Any], evidence: dict[str, list[Evidence]]) -> None:
+def validate_grounding(data: dict[str, Any], evidence: dict[str, list[Evidence]],
+                       article_links: dict[str, str] | None = None) -> None:
     for item in object_items(data, "articles", set(evidence)):
         level = item.get("taiwan_level")
         if type(level) is not int or level not in {0, 1, 2, 3}:
@@ -73,6 +75,15 @@ def validate_grounding(data: dict[str, Any], evidence: dict[str, list[Evidence]]
         item["taiwan_link"] = link if level else None
         if level and link is None:
             item["taiwan_level"] = 0
+        original_link = (article_links or {}).get(item["article_id"])
+        if original_link:
+            # An article is already evidence for its own Taiwan discussion;
+            # preserve that factual link when retrieval or grounding fails.
+            item["taiwan_level"] = item["taiwan_level"] or 3
+            if not link or "article" not in link["basis"] or "（推論）" in link["text_zh"]:
+                item["taiwan_link"] = {"text_zh": original_link, "basis": ["article"]}
+            else:
+                item["taiwan_link"] = link
 
 
 def grounding_units(issue: Issue, ids: list[str], classifications: dict[str, Classification],
@@ -90,11 +101,14 @@ def grounding_units(issue: Issue, ids: list[str], classifications: dict[str, Cla
                        if summary else {})
             payload.append({"article_id": identifier, "title": article.title, "rubric": article.rubric,
                             "provisional_taiwan_level": classifications[identifier].taiwan_level,
+                            "article_taiwan_link": article_taiwan_link(classifications[identifier]),
                             "chinese_summary": chinese, "signals": find_taiwan_signals(article).snippets,
                             "evidence": [entry.to_dict() for entry in evidence[identifier]]})
         selected = {identifier: evidence[identifier] for identifier in batch}
+        article_links = {identifier: link for identifier in batch
+                         if (link := article_taiwan_link(classifications[identifier]))}
         return make_unit("ground", issue.issue_date, batch, config.llm.models.ground,
-                         lambda data: validate_grounding(data, selected), facts=load_taiwan_facts(),
+                         lambda data: validate_grounding(data, selected, article_links), facts=load_taiwan_facts(),
                          articles=prompt_json(payload))
 
     return split_units(ids, build, max_items=3, max_bytes=90_000)
@@ -109,7 +123,9 @@ def apply_grounding(data: dict[str, Any], issue: Issue, classifications: dict[st
                     summaries: dict[str, ArticleSummary], evidence: dict[str, list[Evidence]], config: Config,
                     focus_ids: list[str]) -> None:
     by_id = {article.id: article for article in issue.articles}
-    validate_grounding(data, evidence)
+    article_links = {identifier: link for identifier in evidence
+                     if (link := article_taiwan_link(classifications[identifier]))}
+    validate_grounding(data, evidence, article_links)
     for item in data["articles"]:
         identifier = item["article_id"]
         classification = classifications[identifier]
@@ -165,7 +181,7 @@ def ground_digest(issue: Issue, classifications: dict[str, Classification], summ
                                      "taiwan_link": None, "taiwan_implications": []}
                                     for identifier in unit.article_ids]}
             apply_grounding(empty, issue, classifications, summaries, selected, config, focus_ids)
-            warnings.append("台灣關聯查證失敗，暫不列入台灣專區，保留原摘要。")
+            warnings.append("台灣關聯查證失敗，保留原文實質提及的台灣關聯，刪除未查證推論與意涵。")
 
 
 def validate_fact_alerts(data: dict[str, Any], urls: set[str]) -> None:
@@ -190,7 +206,8 @@ def facts_unit(issue_date: str, evidence: list[Evidence], config: Config) -> Uni
 def check_facts(issue_date: str, config: Config, runner: UnitRunner, cna: CNAClient,
                 warnings: list[str]) -> list[dict]:
     # A successful check is fixed for this issue, even when the search cache ages.
-    identity = hashlib.sha256((load_taiwan_facts() + prompt_json(config.llm.models.facts)).encode()).hexdigest()
+    identity = hashlib.sha256((load_taiwan_facts() + prompt_json(config.llm.models.facts)
+                               + facts_unit(issue_date, [], config).prompt_hash).encode()).hexdigest()
     path = runner.workdir / f"facts-check-{issue_date}.json"
     try:
         saved = json.loads(path.read_text(encoding="utf-8"))
@@ -201,7 +218,7 @@ def check_facts(issue_date: str, config: Config, runner: UnitRunner, cna: CNACli
     except (OSError, ValueError, TypeError):
         pass
     before = len(cna.errors)
-    evidence = cna.retrieve(list(FACT_QUERIES))
+    evidence = cna.retrieve_search(list(FACT_QUERIES))
     notices = (["中央社暫時無法連線；台灣事實檔更新檢查僅能使用已取得的證據。"]
                if len(cna.errors) > before else [])
     warnings.extend(notices)

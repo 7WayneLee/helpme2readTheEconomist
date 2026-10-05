@@ -74,6 +74,7 @@ def guide() -> dict[str, Any]:
 def answer(prompt: str, model: str, stage: str) -> dict[str, Any]:
     if stage == "classify":
         return {"articles": [{"article_id": item["id"], "taiwan_level": 0, "mentions_taiwan": False,
+                               "taiwan_mention_kind": "none", "taiwan_evidence": None,
                                "taiwan_link": None, "category": "culture", "title_zh": "政策改變的成本"}
                               for item in payload(prompt, "文章：")]}
     if stage == "pair":

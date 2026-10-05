@@ -215,9 +215,10 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
     if not pick:
         warnings.append("沒有符合篇幅與文章種類條件的英文選文。")
     edit_digest(issue, classifications, summaries, week_brief, config, runner, warnings)
-    cna = CNAClient(config.paths.data_dir / "research")
+    cna = CNAClient(config.paths.data_dir / "research", request_budget=config.research.cna_request_budget)
     ground_digest(issue, classifications, summaries, focus_ids, config, runner, cna, warnings)
     fact_alerts = check_facts(issue.issue_date, config, runner, cna, warnings)
+    warnings.extend(cna.warnings)
     runner.total_units += english_runner.total_units
     runner.failed_units += english_runner.failed_units
     runner.stats.extend(english_runner.stats)

@@ -61,7 +61,7 @@ class LLMConfig:
     call_timeout_seconds: int = 300
     no_account_wait_seconds: int = 900
     models: ModelsConfig = field(default_factory=ModelsConfig)
-    stage_timeout_seconds: dict[str, int] = field(default_factory=lambda: {"edit": 600, "ground": 600})
+    stage_timeout_seconds: dict[str, int] = field(default_factory=lambda: {"edit": 900, "ground": 600})
 
     def timeout_for(self, stage: str) -> int:
         return self.stage_timeout_seconds.get(stage, self.stage_timeout_seconds.get(
@@ -84,6 +84,11 @@ class TiersConfig:
 @dataclass(frozen=True)
 class AnalysisConfig:
     focus_count: int = 3
+
+
+@dataclass(frozen=True)
+class ResearchConfig:
+    cna_request_budget: int = 40
 
 
 @dataclass(frozen=True)
@@ -151,6 +156,7 @@ class Config:
     llm: LLMConfig = field(default_factory=LLMConfig)
     tiers: TiersConfig = field(default_factory=TiersConfig)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
+    research: ResearchConfig = field(default_factory=ResearchConfig)
     english: EnglishConfig = field(default_factory=EnglishConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     telegraph: TelegraphConfig = field(default_factory=TelegraphConfig)
@@ -242,6 +248,8 @@ def _build(cls: type[T], data: dict[str, Any], prefix: str, base_dir: Path) -> T
 def _validate(config: Config) -> None:
     if config.analysis.focus_count <= 0:
         _fail("analysis.focus_count", "必須大於零")
+    if config.research.cna_request_budget < 0:
+        _fail("research.cna_request_budget", "必須是非負整數")
     if config.site.ssh_timeout_seconds <= 0:
         _fail("site.ssh_timeout_seconds", "必須大於零")
     if config.site.enabled:
@@ -363,7 +371,7 @@ def load_config(path: str | Path | None = None) -> Config:
     _validate(config)
     return Config(
         paths=config.paths, source=config.source, llm=config.llm, tiers=config.tiers,
-        analysis=config.analysis,
+        analysis=config.analysis, research=config.research,
         english=config.english, telegram=config.telegram, telegraph=config.telegraph, report=config.report,
         site=config.site, backup=config.backup, secrets=_load_secrets(),
     )

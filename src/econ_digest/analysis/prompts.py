@@ -40,7 +40,17 @@ def prompt_json(value: Any) -> str:
 
 
 def render_prompt(name: str, issue_date: str, **values: Any) -> tuple[str, str]:
-    source = (PROMPT_DIR / "_style.md").read_text(encoding="utf-8") + "\n" + (
+    style = (PROMPT_DIR / "_style.md").read_text(encoding="utf-8")
+    if name == "edit":
+        # Keep core rules and blacklist substitutions, omit table explanations
+        # and the long title examples: the full preamble exceeds 9 KB itself.
+        blacklist = []
+        for row in style.split("\n## 四、", 1)[0].splitlines():
+            if row.startswith("| **"):
+                columns = row.split("|")
+                blacklist.append(columns[1].strip() + " → " + columns[3].strip())
+        style = style.split("\n## 三、", 1)[0] + "\n翻譯腔替換：\n" + "\n".join(blacklist)
+    source = style + "\n" + (
         PROMPT_DIR / "_common.md").read_text(encoding="utf-8") + "\n" + (
         PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8")
     digest = hashlib.sha256(source.encode()).hexdigest()

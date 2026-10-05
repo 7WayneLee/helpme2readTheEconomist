@@ -4,14 +4,18 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import math
 import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
+from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from urllib.parse import urlencode, urljoin, urlsplit
 from urllib.request import Request, urlopen
 
@@ -20,6 +24,10 @@ from ..models import Source, save_json
 BASE_URL = "https://www.cna.com.tw"
 USER_AGENT = "econ-digest/0.1 (Taiwan news evidence; limited requests)"
 MAX_RESPONSE_BYTES = 2_000_000
+REQUEST_INTERVAL = 2.5
+SEARCH_TTL = 7 * 86400
+ARTICLE_TTL = 30 * 86400
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -159,13 +167,72 @@ class CNAClient:
                  sleep: Callable[[float], None] = time.sleep,
                  clock: Callable[[], float] = time.monotonic,
                  wall_clock: Callable[[], float] = time.time,
-                 today: date | None = None, timeout: float = 15) -> None:
+                 today: date | None = None, timeout: float = 15,
+                 request_budget: int = 40, max_retries: int = 3) -> None:
+        if type(request_budget) is not int or request_budget < 0:
+            raise ValueError("request_budget must be a nonnegative integer")
+        if type(max_retries) is not int or not 0 <= max_retries <= 3:
+            raise ValueError("max_retries must be 0–3")
         self.cache_dir = Path(cache_dir)
         self.opener = opener or urlopen
         self.sleep, self.clock, self.wall_clock = sleep, clock, wall_clock
         self.today, self.timeout = today or date.today(), timeout
         self._last_request: float | None = None
+        self.request_budget, self.max_retries = request_budget, max_retries
+        self.request_count = 0
         self.errors: list[str] = []
+        self.warnings: list[str] = []
+
+    def _retry_after(self, error: HTTPError) -> float:
+        value = error.headers.get("Retry-After", "") if error.headers else ""
+        try:
+            seconds = float(value)
+        except ValueError:
+            try:
+                seconds = parsedate_to_datetime(value).timestamp() - self.wall_clock()
+            except (ValueError, TypeError, OverflowError):
+                return 0.0
+        return max(0.0, seconds) if math.isfinite(seconds) else 0.0
+
+    def _fetch(self, url: str) -> str | None:
+        retry_delay = 0.0
+        for attempt in range(self.max_retries + 1):
+            if self.request_count >= self.request_budget:
+                if "request_budget" not in self.errors:
+                    notice = f"中央社每次分析請求上限（{self.request_budget} 次）已達；後續查證僅使用快取。"
+                    self.errors.append("request_budget")
+                    self.warnings.append(notice)
+                    logger.warning("%s", notice)
+                return None
+            spacing = (max(0.0, REQUEST_INTERVAL - (self.clock() - self._last_request))
+                       if self._last_request is not None else 0.0)
+            delay = max(spacing, retry_delay)
+            if delay:
+                self.sleep(delay)
+            self._last_request = self.clock()
+            self.request_count += 1
+            request = Request(url, headers={"User-Agent": USER_AGENT})
+            try:
+                with self.opener(request, timeout=self.timeout) as response:
+                    raw = response.read(MAX_RESPONSE_BYTES + 1)
+                    if len(raw) > MAX_RESPONSE_BYTES:
+                        raise ValueError("CNA response too large")
+                    final_url = getattr(response, "geturl", lambda: url)()
+                    if urlsplit(final_url).netloc != "www.cna.com.tw":
+                        raise ValueError("unexpected CNA redirect")
+                return raw.decode("utf-8", errors="replace")
+            except HTTPError as exc:
+                if exc.code in {429, 503} and attempt < self.max_retries:
+                    retry_delay = max(REQUEST_INTERVAL * 2 ** attempt, self._retry_after(exc))
+                    exc.close()
+                    continue
+                self.errors.append(f"HTTPError:{exc.code}")
+                exc.close()
+                return None
+            except (OSError, ValueError, TimeoutError) as exc:
+                self.errors.append(type(exc).__name__)
+                return None
+        return None
 
     def _cached(self, url: str, ttl: float, parse: Callable[[str], Any]) -> Any:
         path = self.cache_dir / (hashlib.sha256(url.encode()).hexdigest() + ".json")
@@ -175,20 +242,11 @@ class CNAClient:
                 return cached["data"]
         except (OSError, ValueError, KeyError, TypeError):
             pass
-        now = self.clock()
-        if self._last_request is not None:
-            self.sleep(max(0.0, 1.0 - (now - self._last_request)))
-        self._last_request = self.clock()
-        request = Request(url, headers={"User-Agent": USER_AGENT})
+        html = self._fetch(url)
+        if html is None:
+            return []
         try:
-            with self.opener(request, timeout=self.timeout) as response:
-                raw = response.read(MAX_RESPONSE_BYTES + 1)
-                if len(raw) > MAX_RESPONSE_BYTES:
-                    raise ValueError("CNA response too large")
-                final_url = getattr(response, "geturl", lambda: url)()
-                if urlsplit(final_url).netloc != "www.cna.com.tw":
-                    raise ValueError("unexpected CNA redirect")
-            data = parse(raw.decode("utf-8", errors="replace"))
+            data = parse(html)
         except (OSError, ValueError, TimeoutError) as exc:
             self.errors.append(type(exc).__name__)
             return []
@@ -201,7 +259,7 @@ class CNAClient:
 
     def search(self, query: str) -> list[Source]:
         url = BASE_URL + "/search/hysearchws.aspx?" + urlencode({"q": query})
-        data = self._cached(url, 86400, lambda html: [source.to_dict() for source in parse_search(html, today=self.today)])
+        data = self._cached(url, SEARCH_TTL, lambda html: [source.to_dict() for source in parse_search(html, today=self.today)])
         # Recency is rechecked on cache reads, with dates derived from URLs again.
         sources = []
         for item in data if isinstance(data, list) else []:
@@ -215,15 +273,22 @@ class CNAClient:
         return (recent or sources)[:5]
 
     def retrieve(self, queries: list[str]) -> list[Evidence]:
-        found: dict[str, Source] = {}
-        for query in queries:
-            for source in self.search(query):
-                found.setdefault(source.url, source)
+        found = self.retrieve_search(queries)
         result = []
-        for source in found.values():
-            data = self._cached(source.url, 7 * 86400, lambda html: list(parse_article(html)))
+        for entry in found:
+            source = entry.source
+            data = self._cached(source.url, ARTICLE_TTL, lambda html: list(parse_article(html)))
             if not data or len(data) != 2 or not data[1]:
                 continue
             result.append(Evidence(f"cna{len(result) + 1}", Source(source.outlet, source.date,
                                    data[0] or source.title, source.url), data[1]))
         return result
+
+    def retrieve_search(self, queries: list[str]) -> list[Evidence]:
+        """Return dated search headlines only, without fetching article pages."""
+        found: dict[str, Source] = {}
+        for query in queries:
+            for source in self.search(query):
+                found.setdefault(source.url, source)
+        return [Evidence(f"cna{index}", source, source.title)
+                for index, source in enumerate(found.values(), 1)]

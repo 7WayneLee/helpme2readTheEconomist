@@ -15,7 +15,7 @@ gwg_bin = "gwg" # gwg 執行檔名稱或完整路徑
 max_parallel = 2 # 同時呼叫數
 call_timeout_seconds = 300 # 單次呼叫逾時秒數
 no_account_wait_seconds = 900 # 無可用帳號時的等待秒數
-stage_timeout_seconds = { edit = 600, ground = 600 } # 其他階段仍使用 call_timeout_seconds
+stage_timeout_seconds = { edit = 900, ground = 600 } # 其他階段仍使用 call_timeout_seconds
 
 # 依序嘗試；第一個模型是主要模型。
 [llm.models]
@@ -43,6 +43,9 @@ force_tier_by_kind = { letters = "E", obituary = "E" } # 強制指定的深度
 
 [analysis]
 focus_count = 3 # 台灣專區以外，升為 A 級深度解析的焦點篇數
+
+[research]
+cna_request_budget = 40 # 每次分析最多 HTTP 請求數（含重試）；0 僅使用快取
 
 [english]
 level = "全民英檢中級（多益約 550–780，CEFR B1）" # 目標閱讀程度

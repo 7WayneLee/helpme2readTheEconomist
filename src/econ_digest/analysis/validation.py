@@ -78,6 +78,16 @@ def length(value: Any, field: str, minimum: int, maximum: int) -> None:
         raise ValueError(f"{field}: {count} Chinese characters; expected approximately {minimum}–{maximum}")
 
 
+def validate_headline(value: Any, title: str | None = None) -> None:
+    headline = text(value, "headline_zh")
+    length(headline, "headline_zh", 30, 60)
+    if (headline != headline.strip() or not headline.endswith("。")
+            or headline.count("。") != 1 or any(mark in headline for mark in "\u3000\n\r!?！？")):
+        raise ValueError("headline_zh must be one natural sentence ending with 。, without full-width spaces")
+    if title is not None and re.sub(r"\W", "", headline) == re.sub(r"\W", "", text(title, "title_zh")):
+        raise ValueError("headline_zh must differ from title_zh")
+
+
 def validate_argument(value: Any, *, tier: str) -> None:
     if not isinstance(value, dict):
         raise ValueError("argument must be an object")
@@ -89,8 +99,7 @@ def validate_argument(value: Any, *, tier: str) -> None:
 
 def validate_summary(item: dict[str, Any], article: Article, tier: str, *, leader: bool = False) -> None:
     headline = text(item.get("headline_zh"), "headline_zh")
-    if tier != "E" and chinese_length(headline) > 50:
-        raise ValueError("headline_zh exceeds 50 Chinese characters")
+    validate_headline(headline, item.get("title_zh"))
     if tier == "A":
         length(text(item.get("background"), "background"), "background", 100, 330)
         structure = strings(item.get("structure"), "structure", 4, 8)
@@ -134,7 +143,7 @@ def validate_summary(item: dict[str, Any], article: Article, tier: str, *, leade
             raise ValueError("D summary_zh requires 2–3 sentences")
         length(summary, "summary_zh", 50, 210)
     elif tier == "E":
-        length(headline, "headline_zh", 20, 85)
+        length(headline, "headline_zh", 30, 60)
     else:
         raise ValueError(f"Unsupported summary tier: {tier}")
     strings(item.get("taiwan_implications", []), "taiwan_implications", 0, 3)

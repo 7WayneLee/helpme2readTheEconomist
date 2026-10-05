@@ -97,6 +97,7 @@ def overview(digest: Digest) -> str:
     leader = next((article for article in leaders if article.is_cover), leaders[0] if leaders else None)
     classification = digest.classifications.get(leader.id) if leader else None
     heading = clean_text(classification.title_zh) if classification else ""
+    heading = heading.removeprefix("經濟學人專欄：").removeprefix("經濟學人：")
     count = f"共 {len(digest.issue.articles)} 篇文章"
     return f"{heading}｜{count}" if heading else count
 

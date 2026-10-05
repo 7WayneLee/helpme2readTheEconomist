@@ -7,7 +7,8 @@ import pytest
 
 from econ_digest.analysis.cache import UnitRunner
 from econ_digest.analysis.classification import classify_units
-from econ_digest.analysis.editor import apply_edits, edit_digest, edit_units, editor_items, faithful_text, valid_title
+from econ_digest.analysis.editor import (apply_edits, edit_digest, edit_units, editor_items,
+                                        faithful_text, valid_headline, valid_title)
 from econ_digest.analysis.english import guide_unit, pick_unit
 from econ_digest.analysis.focus import focus_unit
 from econ_digest.analysis.grounding import (apply_grounding, check_facts, facts_unit, ground_digest,
@@ -35,13 +36,14 @@ def test_model_routes_and_example(tmp_path: Path) -> None:
 
 def test_stage_timeouts_config_and_runner(tmp_path: Path) -> None:
     config = Config()
-    assert config.llm.timeout_for('edit') == config.llm.timeout_for('ground') == 600
+    assert config.llm.timeout_for('edit') == 900
+    assert config.llm.timeout_for('ground') == 600
     assert config.llm.timeout_for('ground_queries') == 600
     assert config.llm.timeout_for('facts') == config.llm.timeout_for('summarize_a') == 300
     path = tmp_path / 'config.toml'
     path.write_text('[llm]\nstage_timeout_seconds = { facts = 45 }')
     custom = load_config(path)
-    assert custom.llm.timeout_for('facts') == 45 and custom.llm.timeout_for('edit') == 600
+    assert custom.llm.timeout_for('facts') == 45 and custom.llm.timeout_for('edit') == 900
     class RecordingClient:
         def generate_json(self, prompt, **kwargs):
             from econ_digest.llm.api import LLMResult
@@ -52,6 +54,18 @@ def test_stage_timeouts_config_and_runner(tmp_path: Path) -> None:
     for value in ['{ edit = 0 }', '{ invented = 600 }', '{ ground = true }']:
         path.write_text('[llm]\nstage_timeout_seconds = ' + value)
         with pytest.raises(ConfigError, match='stage_timeout_seconds'):
+            load_config(path)
+
+
+def test_cna_budget_config(tmp_path):
+    assert Config().research.cna_request_budget == 40
+    path = tmp_path / 'config.toml'
+    for budget in (0, 15):
+        path.write_text(f'[research]\ncna_request_budget = {budget}\n')
+        assert load_config(path).research.cna_request_budget == budget
+    for invalid in ('-1', 'true', '2.5'):
+        path.write_text(f'[research]\ncna_request_budget = {invalid}\n')
+        with pytest.raises(ConfigError, match='research.cna_request_budget'):
             load_config(path)
 
 
@@ -66,7 +80,8 @@ def test_house_style_prefix_on_all_generated_units(analysis_config: Config) -> N
     units += query_units(source, ['a1'], classes, summaries, analysis_config)
     units += grounding_units(source, ['a1'], classes, summaries, {'a1': []}, analysis_config)
     style = (PROMPT_DIR / '_style.md').read_text()
-    assert all(unit.prompt.startswith(style + '\n') for unit in units)
+    assert all(unit.prompt.startswith((style.split('\n## 三、', 1)[0] if unit.stage == 'edit' else style) + '\n')
+               for unit in units)
     assert '泛論「中國影響力擴大，所以台灣受影響」為 0' in units[0].prompt
     assert '待查證的暫定判斷' in units[0].prompt
     assert '必須保留發言者歸屬與時點' in units[-1].prompt
@@ -163,7 +178,7 @@ def test_editor_individual_fallback_brief_cache_and_english_untouched(analysis_c
                             'headline_zh': '中國態度冷淡，美國盼建AI危機專線。'}]},
                 inputs, classes, summaries, brief)
     assert classes['a1'].title_zh == previous
-    assert summaries['a1'].headline_zh == '中國態度冷淡，美國盼建AI危機專線。'
+    assert summaries['a1'].headline_zh == EDITOR_INPUT['headline_zh']
     units = edit_units(source, classes, summaries, brief, analysis_config)
     assert len(units) == 1
     runner = UnitRunner(FakeLLMClient(answer), tmp_path)
@@ -177,8 +192,73 @@ def test_editor_splits_large_batch(analysis_config: Config) -> None:
     source = issue([replace(article(f'a{i}'), rubric='Synthetic rubric ' * 100) for i in range(70)])
     classes = {a.id: Classification(a.id, 0, False, None, 'culture', '政策改變企業成本', tier='E') for a in source.articles}
     units = edit_units(source, classes, {}, None, analysis_config)
-    assert len(units) > 1 and all(unit.prompt_bytes <= 15_000 and len(unit.article_ids) <= 20 for unit in units)
+    assert len(units) > 1 and all(unit.prompt_bytes <= 9_000 and len(unit.article_ids) <= 10 for unit in units)
     assert sum(len(unit.article_ids) for unit in units) == 70
+
+
+NATURAL_HEADLINE = '美國盼建立AI危機熱線，但中國態度冷淡，使雙方在危機應變機制上的互信仍面臨挑戰。'
+
+
+@pytest.mark.parametrize('candidate,expected', [
+    (NATURAL_HEADLINE, True),
+    ('政策' * 15 + '。', True),
+    ('政策' * 30 + '。', True),
+    ('政策' * 31 + '。', False),
+    ('政策' * 14 + '。', False),
+    ('美中AI危機熱線　中國態度冷淡', False),
+    (NATURAL_HEADLINE.replace('，', '　'), False),
+    (NATURAL_HEADLINE[:-1], False),
+    (NATURAL_HEADLINE.replace('，', '。'), False),
+    (NATURAL_HEADLINE.replace('。', '？'), False),
+    ('\n' + NATURAL_HEADLINE, False),
+])
+def test_editor_headline_is_one_complete_sentence(candidate, expected):
+    assert valid_headline(candidate, EDITOR_INPUT, '美盼建AI危機專線　中國態度冷淡') == expected
+
+
+def test_editor_keeps_previous_headline_and_checks_accepted_title(analysis_config):
+    source = issue([replace(article('a1'), title=EDITOR_INPUT['title'], rubric='')])
+    classes = {'a1': Classification('a1', 0, False, None, 'tech', '美盼建AI危機專線　中國態度冷淡', tier='C')}
+    summaries = {'a1': ArticleSummary('a1', 'C', NATURAL_HEADLINE)}
+    inputs = editor_items(source, classes, summaries, None)
+    for candidate in ('地方首長守民主防線　市政廳成抵禦威權關鍵堡壘',
+                      classes['a1'].title_zh, classes['a1'].title_zh + '。'):
+        apply_edits({'items': [{'id': 'a1', 'headline_zh': candidate}]}, inputs, classes, summaries, None)
+        assert summaries['a1'].headline_zh == NATURAL_HEADLINE
+    assert not valid_headline(NATURAL_HEADLINE, inputs[0], NATURAL_HEADLINE[:-1])
+    candidate = NATURAL_HEADLINE.replace('但中國態度冷淡', '中國態度仍冷淡')
+    apply_edits({'items': [{'id': 'a1', 'headline_zh': candidate}]}, inputs, classes, summaries, None)
+    assert summaries['a1'].headline_zh == candidate
+
+
+@pytest.mark.parametrize('failure', ['downgrade', 'invalid-basis', 'unavailable'])
+def test_substantive_taiwan_history_survives_grounding(analysis_config, tmp_path, failure):
+    body = 'The presidential hotline was established in 1998 after the Taiwan Strait crisis of 1996.'
+    source = issue([article('a1', paragraphs=[body])])
+    link = '原文回顧 1996 年台海危機後，美中在 1998 年建立元首熱線。'
+    classes = {'a1': Classification('a1', 3, True, link, 'tech', '美盼建AI危機專線　中國態度冷淡', tier='C')}
+    summaries = {'a1': ArticleSummary('a1', 'C', NATURAL_HEADLINE, taiwan_implications=['沒有根據的推論'])}
+    cna = CNAClient(tmp_path / 'research')
+    cna.retrieve = lambda _: []
+    proposed = {'articles': [{'article_id': 'a1', 'taiwan_level': 0 if failure == 'downgrade' else 3,
+                              'taiwan_link': None if failure == 'downgrade' else
+                              {'text_zh': '缺乏根據。', 'basis': ['cna999']}, 'taiwan_implications': []}]}
+    fake = FakeLLMClient(lambda prompt, model, stage:
+                         (LLMError('unavailable', kind='quota') if failure == 'unavailable' else proposed)
+                         if stage == 'ground' else answer(prompt, model, stage))
+    ground_digest(source, classes, summaries, [], analysis_config, UnitRunner(fake, tmp_path / 'analysis'), cna, [])
+    assert classes['a1'].taiwan_level == 3 and classes['a1'].taiwan_link == link
+    assert classes['a1'].sources == [] and summaries['a1'].taiwan_implications == []
+    assert summaries['a1'].headline_zh == NATURAL_HEADLINE
+
+
+@pytest.mark.parametrize('link', ['（推論）尚需證據的機制。', '台灣關聯待確認。'])
+def test_unverified_signal_or_inference_does_not_get_grounding_floor(analysis_config, link):
+    source = issue([article('a1', paragraphs=['Taiwan is mentioned.'])])
+    classes = {'a1': Classification('a1', 3, True, link, 'tech', '合成標題', tier='C')}
+    data = {'articles': [{'article_id': 'a1', 'taiwan_level': 0, 'taiwan_link': None, 'taiwan_implications': []}]}
+    apply_grounding(data, source, classes, {}, {'a1': []}, analysis_config, [])
+    assert classes['a1'].taiwan_level == 0
 
 
 def sample_evidence() -> Evidence:
@@ -276,7 +356,8 @@ def test_facts_alert_validation_and_once_per_issue(analysis_config: Config, tmp_
     assert data['alerts'] == [alert]
     cna = CNAClient(tmp_path / 'research')
     retrieved = []
-    cna.retrieve = lambda queries: retrieved.append(queries) or [ev]
+    cna.retrieve_search = lambda queries: retrieved.append(queries) or [ev]
+    cna.retrieve = lambda _: pytest.fail('facts checks must not fetch article pages')
     client = FakeLLMClient(lambda *args: {'alerts': [alert]})
     runner = UnitRunner(client, tmp_path / 'analysis')
     assert check_facts('2026.10.03', analysis_config, runner, cna, []) == [alert]

@@ -11,7 +11,7 @@ from ..llm import run_parallel
 from ..zhtw import normalize_zh_tw
 from .cache import UnitRunner
 from .prompts import Unit, make_unit, prompt_json, split_units
-from .validation import chinese_length
+from .validation import chinese_length, validate_headline
 
 # Known named entities are checked as complete strings, including common
 # abbreviations; the character gate below conservatively catches unfamiliar names.
@@ -26,7 +26,7 @@ _STYLE_CHARS = set("新聞民調研究報告經濟學人專欄立場作者主張
 _ATTRIBUTIONS = {"經濟學人", "經濟學人專欄", "經濟學人立場", "民調", "研究", "報告", "分析"}
 # These ordinary editing words add no named entities. Keep this vocabulary
 # separate from input facts so a new person or place still fails the name gate.
-_STYLE_CHARS.update("掀擊推引爆砸提狂謀癱瘓涉錄捨靠登若晤瘋帶")
+_STYLE_CHARS.update("掀擊推引爆砸提狂謀癱瘓涉錄捨靠登若晤瘋帶雙")
 
 
 def _numbers(value: str) -> set[str]:
@@ -83,6 +83,16 @@ def valid_title(candidate: Any, inputs: dict[str, Any]) -> bool:
     return True
 
 
+def valid_headline(candidate: Any, inputs: dict[str, Any], title: str) -> bool:
+    if not faithful_text(candidate, inputs):
+        return False
+    try:
+        validate_headline(candidate, title)
+    except ValueError:
+        return False
+    return True
+
+
 def editor_items(issue: Issue, classifications: dict[str, Classification],
                  summaries: dict[str, ArticleSummary], brief: WeekBrief | None) -> list[dict[str, Any]]:
     result = [{"id": article.id, "title": article.title, "rubric": article.rubric,
@@ -114,7 +124,7 @@ def edit_units(issue: Issue, classifications: dict[str, Classification], summari
                          items=prompt_json(batch))
 
     return split_units(editor_items(issue, classifications, summaries, brief), build,
-                       max_items=20, max_bytes=15_000)
+                       max_items=10, max_bytes=9_000)
 
 
 def apply_edits(data: dict[str, Any], inputs: list[dict[str, Any]], classifications: dict[str, Classification],
@@ -129,11 +139,12 @@ def apply_edits(data: dict[str, Any], inputs: list[dict[str, Any]], classificati
                 getattr(brief, group)[int(index)].text_zh = candidate
             continue
         identifier = item["id"]
-        if valid_title(item.get("title_zh"), original):
+        if (valid_title(item.get("title_zh"), original)
+                and re.sub(r"\W", "", item["title_zh"]) != re.sub(
+                    r"\W", "", summaries[identifier].headline_zh if identifier in summaries else "")):
             classifications[identifier].title_zh = item["title_zh"]
         headline = item.get("headline_zh")
-        if (identifier in summaries and faithful_text(headline, original)
-                and 1 <= chinese_length(headline) <= (85 if original["tier"] == "E" else 50)):
+        if identifier in summaries and valid_headline(headline, original, classifications[identifier].title_zh):
             summaries[identifier].headline_zh = headline
 
 

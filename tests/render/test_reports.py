@@ -68,6 +68,24 @@ def test_issue_header_across_all_outputs(sample_digest, tmp_path, choice):
         assert "台灣 T1" not in output and "英文選文：" not in output and "社論" not in output
 
 
+@pytest.mark.parametrize('prefix', ['經濟學人：', '經濟學人專欄：', ''])
+def test_overview_strips_attribution_prefix_only(sample_digest, prefix):
+    leader = next(article for article in sample_digest.issue.articles if article.kind == 'leader')
+    leader.is_cover = True
+    original = prefix + '有效利他主義成顯學　理念崇高卻藏風險'
+    sample_digest.classifications[leader.id].title_zh = original
+    assert overview(sample_digest) == f'有效利他主義成顯學　理念崇高卻藏風險｜共 {len(sample_digest.issue.articles)} 篇文章'
+    assert sample_digest.classifications[leader.id].title_zh == original
+
+
+def test_overview_preserves_attribution_inside_title(sample_digest):
+    leader = next(article for article in sample_digest.issue.articles if article.kind == 'leader')
+    leader.is_cover = True
+    original = '民調：讀者評價經濟學人：專欄觀點'
+    sample_digest.classifications[leader.id].title_zh = original
+    assert overview(sample_digest).startswith(original + '｜')
+
+
 def test_markdown_sections_and_complete_fields(sample_digest: Digest) -> None:
     report = render_markdown(sample_digest)
     assert report.startswith("# 經濟學人導讀｜2026 年 10 月 3 日號")
