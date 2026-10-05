@@ -403,3 +403,16 @@ def test_discover_private_chats_newest_first() -> None:
         {"chat_id": 1, "username": "new", "first_name": "新"},
         {"chat_id": 2, "username": None, "first_name": "測試"},
     ]
+
+
+def test_instant_view_link_preview_url() -> None:
+    client, opener, _ = make_client([success()])
+    client.send_message(123, '<a href="https://telegra.ph/test">導讀</a>', link_preview_url="https://telegra.ph/test")
+    assert json_body(opener.requests[0])["link_preview_options"] == {"url": "https://telegra.ph/test", "prefer_large_media": False}
+
+
+def test_link_preview_survives_plain_text_fallback() -> None:
+    client, opener, _ = make_client([api_error(400, "can't parse entities"), success()])
+    client.send_message_safe(123, '<a href="https://telegra.ph/test">導讀</a>', link_preview_url="https://telegra.ph/test")
+    assert json_body(opener.requests[1])["link_preview_options"] == {"url": "https://telegra.ph/test", "prefer_large_media": False}
+    assert "parse_mode" not in json_body(opener.requests[1])

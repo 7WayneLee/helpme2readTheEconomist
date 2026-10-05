@@ -12,7 +12,7 @@ from econ_digest.config import ConfigError, load_config
 @pytest.fixture(autouse=True)
 def isolate_config_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
-    for name in ("ECON_DIGEST_CONFIG", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN"):
+    for name in ("ECON_DIGEST_CONFIG", "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN", "TELEGRAPH_ACCESS_TOKEN"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ECON_DIGEST_ENV_FILE", str(tmp_path / "no-env-file"))
 
@@ -27,6 +27,12 @@ def test_defaults_and_frozen_tree(tmp_path: Path) -> None:
     assert config.english.min_words == 600
     assert config.english.level.startswith("全民英檢中級")
     assert config.telegram.message_delay_seconds == 1.1
+    assert config.telegram.delivery == "telegraph"
+    assert config.telegram.send_report_file is False
+    assert config.telegraph.author_name == "經濟學人導讀"
+    assert config.telegraph.author_url == ""
+    assert config.telegraph.page_limit_bytes == 60000
+    assert config.secrets.telegraph_access_token is None
     assert config.secrets.telegram_bot_token is None
     with pytest.raises(FrozenInstanceError):
         config.llm.max_parallel = 3  # type: ignore[misc]
@@ -78,6 +84,11 @@ force_tier_by_kind = {}
     ('[telegram]\nenabled = "true"', "telegram.enabled"),
     ('[telegram]\nmessage_delay_seconds = -1', "telegram.message_delay_seconds"),
     ('[telegram]\nmessage_delay_seconds = nan', "telegram.message_delay_seconds"),
+    ('[telegram]\ndelivery = "other"', "telegram.delivery"),
+    ('[telegraph]\npage_limit_bytes = 0', "telegraph.page_limit_bytes"),
+    ('[telegraph]\npage_limit_bytes = 64001', "telegraph.page_limit_bytes"),
+    ('[telegraph]\npage_limit_bytes = true', "telegraph.page_limit_bytes"),
+    ('[telegraph]\nauthor_name = ""', "telegraph.author_name"),
     ('[english]\nmax_words = 100', "english.max_words"),
     ('[tiers.taiwan]\n"1" = "F"', "tiers.taiwan.1"),
     ('[source]\nrepo = "bad"', "source.repo"),
@@ -147,6 +158,28 @@ def test_example_matches_defaults(tmp_path: Path) -> None:
     assert configured.source == default.source
     assert configured.english == default.english
     assert configured.telegram == default.telegram
+    assert configured.telegraph == default.telegraph
+
+
+def test_telegraph_env_secret_precedence_and_redaction(monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+                                                     caplog: pytest.LogCaptureFixture) -> None:
+    from econ_digest.logutil import _RedactingFormatter, redact
+    path = tmp_path / "env"
+    path.write_text('TELEGRAPH_ACCESS_TOKEN="file-secret-telegraph"\n')
+    path.chmod(0o600)
+    monkeypatch.setenv("ECON_DIGEST_ENV_FILE", str(path))
+    config = load_config()
+    assert config.secrets.telegraph_access_token == "file-secret-telegraph"
+    monkeypatch.setenv("TELEGRAPH_ACCESS_TOKEN", "environment-secret-telegraph")
+    config = load_config()
+    assert config.secrets.telegraph_access_token == "environment-secret-telegraph"
+    assert "environment-secret-telegraph" not in repr(config.secrets)
+    assert "environment-secret-telegraph" not in repr(config)
+    assert "file-secret-telegraph" not in caplog.text
+    error = RuntimeError("error: environment-secret-telegraph")
+    assert "environment-secret-telegraph" not in redact(str(error), config.secrets)
+    record = logging.LogRecord("test", logging.ERROR, "", 1, "%s", (error,), None)
+    assert "environment-secret-telegraph" not in _RedactingFormatter(config.secrets).format(record)
 
 
 def test_relative_executable_paths_follow_config_directory(tmp_path: Path) -> None:

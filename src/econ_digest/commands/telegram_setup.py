@@ -16,21 +16,28 @@ from ..telegram import TelegramClient, discover_private_chats
 def update_chat_id(path: Path, chat_id: str) -> None:
     if not re.fullmatch(r"-?\d+", chat_id):
         raise ValueError("TELEGRAM_CHAT_ID 必須是數字")
+    update_env_value(path, "TELEGRAM_CHAT_ID", chat_id)
+
+
+def update_env_value(path: Path, key: str, value: str) -> None:
+    """Atomically replace one env key, preserving unrelated lines and mode 600."""
+    if not re.fullmatch(r"[A-Z][A-Z0-9_]*", key) or not value or any(c in value for c in "\r\n\x00"):
+        raise ValueError("密鑰設定鍵或值格式無效")
     path.parent.mkdir(parents=True, exist_ok=True)
     contents = path.read_text(encoding="utf-8") if path.exists() else ""
     result: list[str] = []
     replaced = False
     for line in contents.splitlines(keepends=True):
-        if re.match(r"\s*TELEGRAM_CHAT_ID\s*=", line):
+        if re.match(rf"\s*{re.escape(key)}\s*=", line):
             if not replaced:
-                result.append(f"TELEGRAM_CHAT_ID={chat_id}\n")
+                result.append(f"{key}={value}\n")
                 replaced = True
         else:
             result.append(line)
     if not replaced:
         if result and not result[-1].endswith("\n"):
             result[-1] += "\n"
-        result.append(f"TELEGRAM_CHAT_ID={chat_id}\n")
+        result.append(f"{key}={value}\n")
     temporary: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent,

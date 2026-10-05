@@ -6,17 +6,53 @@ import argparse
 import hashlib
 import json
 from collections.abc import Callable
+from dataclasses import asdict
+from pathlib import Path
 
 from ..config import Config
 from ..models import Digest, load_json, save_json
+from ..render.telegraph import (PREVIEW_URL, original_text_messages, render_telegraph,
+                                summary_message, with_navigation)
 from ..state import AlreadyRunning, load_state, run_lock, save_state, utc_now
+from ..telegraph import TelegraphClient, content_size
+from ..telegraph.publish import load_pages, publish_pages
 from ..telegram import TelegramClient
 from ..telegram.format import check_html, utf16_len
 from . import add_issue_argument
 from .render import saved_issue_directory
+from .telegraph_setup import ensure_account
 
 SETUP_INSTRUCTIONS = ("尚未設定 Telegram：請在 ~/.config/econ-digest/env 填入 TELEGRAM_BOT_TOKEN，"
                       "再執行 econ-digest telegram-setup 設定 TELEGRAM_CHAT_ID。")
+
+
+def _progress(path: Path, fingerprint: str, message_count: int, *, force: bool,
+              telegraph: bool) -> dict:
+    progress = {"fingerprint": fingerprint, "next_message": 0, "document_sent": False}
+    if telegraph:
+        progress["pages_published"] = False
+    if path.exists() and not force:
+        previous = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(previous, dict) or previous.get("fingerprint") != fingerprint:
+            raise ValueError("報告或聊天室已變更；請確認後使用 --force 重新傳送")
+        progress = previous
+    next_message = progress.get("next_message")
+    if (type(next_message) is not int or not 0 <= next_message <= message_count
+            or type(progress.get("document_sent")) is not bool
+            or telegraph and type(progress.get("pages_published")) is not bool):
+        raise ValueError("telegram_progress.json 的傳送進度無效")
+    if telegraph and next_message and not progress["pages_published"]:
+        raise ValueError("telegram_progress.json 的頁面發布進度無效")
+    return progress
+
+
+def _validate_messages(messages: list[str]) -> None:
+    if not isinstance(messages, list) or not all(isinstance(message, str) for message in messages):
+        raise ValueError("telegram_messages.json 必須是字串陣列")
+    for message in messages:
+        check_html(message)
+        if utf16_len(message) > 4000:
+            raise ValueError("Telegram 訊息超過 4000 個 UTF-16 單位；請重新 render")
 
 
 def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = False,
@@ -28,37 +64,59 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
     directory = saved_issue_directory(config, issue_spec)
     digest = load_json(directory / "digest.json", Digest)
     state = load_state(config.paths.data_dir)
-    if digest.issue_date in state["delivered"] and not force:
+    telegraph = config.telegram.delivery == "telegraph"
+    if digest.issue_date in state["delivered"] and not force and not (dry_run and telegraph):
         log("本期已傳送；如需再次傳送，請加上 --force。")
         return 0
-    messages = json.loads((directory / "telegram_messages.json").read_text(encoding="utf-8"))
-    if not isinstance(messages, list) or not all(isinstance(message, str) for message in messages):
-        raise ValueError("telegram_messages.json 必須是字串陣列")
-    for message in messages:
-        check_html(message)
-        if utf16_len(message) > 4000:
-            raise ValueError("Telegram 訊息超過 4000 個 UTF-16 單位；請重新 render")
+    pages_path = directory / "telegraph_pages.json"
+    if telegraph:
+        stored = load_pages(pages_path)
+        reserve = max([len(PREVIEW_URL), *[len(page.url.encode("utf-8")) for page in stored]])
+        pages = render_telegraph(digest, config.telegraph.page_limit_bytes, url_reserve_bytes=reserve)
+        known_urls = {page.key: page.url for page in stored}
+        urls = {page.key: known_urls.get(page.key, f"https://telegra.ph/{index:016x}-00-00")
+                for index, page in enumerate(pages, 1)}
+        originals = original_text_messages(digest)
+        messages = [summary_message(digest, pages, urls), *originals]
+    else:
+        messages = json.loads((directory / "telegram_messages.json").read_text(encoding="utf-8"))
+    _validate_messages(messages)
     if dry_run:
+        if telegraph:
+            log("Telegraph 離線預覽（尚未發布的頁面使用預覽網址）。")
+            for page in with_navigation(pages, urls):
+                log(f"{page.title}｜{content_size(page.nodes)} 位元組")
         for index, message in enumerate(messages, 1):
             log(f"--- 訊息 {index}/{len(messages)} ---\n{message}")
         return 0
     assert token is not None and chat_id is not None
     report_path = directory / "report.html"
     report_bytes = report_path.read_bytes() if config.telegram.send_report_file else b""
-    fingerprint = hashlib.sha256(json.dumps([messages, chat_id, config.telegram.send_report_file], ensure_ascii=False).encode("utf-8") + report_bytes).hexdigest()
+    payload = ([[asdict(page) for page in pages], originals, chat_id, config.telegram.send_report_file,
+                asdict(config.telegraph), "telegraph"] if telegraph
+               else [messages, chat_id, config.telegram.send_report_file])
+    fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode("utf-8") + report_bytes).hexdigest()
     progress_path = directory / "telegram_progress.json"
-    progress = {"fingerprint": fingerprint, "next_message": 0, "document_sent": False}
-    if progress_path.exists() and not force:
-        previous = json.loads(progress_path.read_text(encoding="utf-8"))
-        if previous.get("fingerprint") != fingerprint:
-            raise ValueError("報告或聊天室已變更；請確認後使用 --force 重新傳送")
-        progress = previous
+    progress = _progress(progress_path, fingerprint, len(messages), force=force, telegraph=telegraph)
+    if telegraph:
+        save_json(progress_path, progress)
+        if not progress["pages_published"]:
+            access_token = ensure_account(config, log=log)
+            published = publish_pages(TelegraphClient(access_token), pages, pages_path, config.telegraph)
+            urls = {page.key: page.url for page in published}
+            progress["pages_published"] = True
+            save_json(progress_path, progress)
+        elif any(page.key not in known_urls for page in pages):
+            raise ValueError("已發布的 Telegraph 頁面紀錄遺失；請檢查 telegraph_pages.json")
+        messages = [summary_message(digest, pages, urls), *originals]
+        _validate_messages(messages)
     next_message = progress["next_message"]
-    if type(next_message) is not int or not 0 <= next_message <= len(messages):
-        raise ValueError("telegram_progress.json 的傳送進度無效")
     client = TelegramClient(token, min_interval=config.telegram.message_delay_seconds)
     for index in range(next_message, len(messages)):
-        client.send_message_safe(chat_id, messages[index])
+        if telegraph and index == 0:
+            client.send_message_safe(chat_id, messages[index], link_preview_url=urls[pages[0].key])
+        else:
+            client.send_message_safe(chat_id, messages[index])
         progress["next_message"] = index + 1
         save_json(progress_path, progress)
     if config.telegram.send_report_file and not progress["document_sent"]:
@@ -81,7 +139,7 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
 def configure(parser: argparse.ArgumentParser) -> None:
     add_issue_argument(parser)
     parser.add_argument("--force", action="store_true", help="重新傳送本期所有訊息")
-    parser.add_argument("--dry-run", action="store_true", help="列印訊息內容")
+    parser.add_argument("--dry-run", action="store_true", help="離線列印頁面大小與訊息內容")
 
 
 def run(args: argparse.Namespace, config: Config) -> int:

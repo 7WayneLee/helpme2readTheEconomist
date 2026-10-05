@@ -199,7 +199,8 @@ class TelegramClient:
         return result["message_id"]
 
     def send_message(
-        self, chat_id: ChatId, html: str, *, disable_notification: bool = False
+        self, chat_id: ChatId, html: str, *, disable_notification: bool = False,
+        link_preview_url: str | None = None,
     ) -> int:
         result = self._json_request(
             "sendMessage",
@@ -208,7 +209,8 @@ class TelegramClient:
                 "text": html,
                 "parse_mode": "HTML",
                 "disable_notification": disable_notification,
-                "link_preview_options": {"is_disabled": True},
+                "link_preview_options": ({"url": link_preview_url, "prefer_large_media": False}
+                                         if link_preview_url is not None else {"is_disabled": True}),
             },
             sending=True,
         )
@@ -227,7 +229,8 @@ class TelegramClient:
                 "chat_id": chat_id,
                 "text": strip_tags(html),
                 "disable_notification": kw.get("disable_notification", False),
-                "link_preview_options": {"is_disabled": True},
+                "link_preview_options": ({"url": kw["link_preview_url"], "prefer_large_media": False}
+                                         if kw.get("link_preview_url") is not None else {"is_disabled": True}),
             },
             sending=True,
         )

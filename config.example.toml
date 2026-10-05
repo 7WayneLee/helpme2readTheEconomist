@@ -44,8 +44,14 @@ phrase_count = 7 # 片語數
 
 [telegram]
 enabled = true # 啟用 Telegram 推送
-send_report_file = true # 附上完整報告檔案
+delivery = "telegraph" # Telegraph 即時檢視；messages 為逐則傳送
+send_report_file = false # 附上完整報告檔案
 message_delay_seconds = 1.1 # 訊息間隔秒數
 
+[telegraph]
+author_name = "經濟學人導讀" # 頁面作者
+author_url = "" # 作者連結（選填）
+page_limit_bytes = 60000 # 每頁內容 JSON 的 UTF-8 位元組上限
+
 # 密鑰使用環境變數或 ~/.config/econ-digest/env（權限建議 600）。
-# TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_ID、GITHUB_TOKEN 不放在此檔。
+# TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_ID、GITHUB_TOKEN、TELEGRAPH_ACCESS_TOKEN 不放在此檔。

@@ -82,8 +82,16 @@ class EnglishConfig:
 @dataclass(frozen=True)
 class TelegramConfig:
     enabled: bool = True
-    send_report_file: bool = True
+    send_report_file: bool = False
     message_delay_seconds: float = 1.1
+    delivery: str = "telegraph"
+
+
+@dataclass(frozen=True)
+class TelegraphConfig:
+    author_name: str = "經濟學人導讀"
+    author_url: str = ""
+    page_limit_bytes: int = 60000
 
 
 @dataclass(frozen=True)
@@ -91,6 +99,7 @@ class SecretsConfig:
     telegram_bot_token: str | None = field(default=None, repr=False)
     telegram_chat_id: str | None = field(default=None, repr=False)
     github_token: str | None = field(default=None, repr=False)
+    telegraph_access_token: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -101,6 +110,7 @@ class Config:
     tiers: TiersConfig = field(default_factory=TiersConfig)
     english: EnglishConfig = field(default_factory=EnglishConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
+    telegraph: TelegraphConfig = field(default_factory=TelegraphConfig)
     secrets: SecretsConfig = field(default_factory=SecretsConfig, repr=False)
 
 
@@ -119,7 +129,7 @@ def _convert(value: Any, annotation: Any, key: str, base_dir: Path) -> Any:
         path = Path(value).expanduser()
         return (base_dir / path).resolve()
     if annotation is str:
-        if not isinstance(value, str) or not value.strip():
+        if not isinstance(value, str) or (not value.strip() and key != "telegraph.author_url"):
             _fail(key, "必須是非空字串")
         return value
     if annotation is bool:
@@ -201,6 +211,14 @@ def _validate(config: Config) -> None:
         _fail("english.max_words", "必須大於或等於 english.min_words")
     if not 0 <= config.telegram.message_delay_seconds < float("inf"):
         _fail("telegram.message_delay_seconds", "必須是有限的非負數")
+    if config.telegram.delivery not in ("telegraph", "messages"):
+        _fail("telegram.delivery", "必須是 telegraph 或 messages")
+    if not 1 <= config.telegraph.page_limit_bytes <= 64000:
+        _fail("telegraph.page_limit_bytes", "必須介於 1 與 64000 之間")
+    if len(config.telegraph.author_name) > 128:
+        _fail("telegraph.author_name", "最多 128 個字元")
+    if len(config.telegraph.author_url) > 512:
+        _fail("telegraph.author_url", "最多 512 個字元")
     allowed = {
         "taiwan": {"1", "2", "3"}, "category": set(CATEGORIES),
         "min_tier_by_kind": set(KINDS), "force_tier_by_kind": set(KINDS),
@@ -216,7 +234,7 @@ def _validate(config: Config) -> None:
 def _load_secrets() -> SecretsConfig:
     values = dict(os.environ)
     env_path = Path(values.get("ECON_DIGEST_ENV_FILE", "~/.config/econ-digest/env")).expanduser()
-    names = {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN"}
+    names = {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN", "TELEGRAPH_ACCESS_TOKEN"}
     try:
         mode = env_path.stat().st_mode
     except FileNotFoundError:
@@ -248,6 +266,7 @@ def _load_secrets() -> SecretsConfig:
         telegram_bot_token=values.get("TELEGRAM_BOT_TOKEN") or None,
         telegram_chat_id=values.get("TELEGRAM_CHAT_ID") or None,
         github_token=values.get("GITHUB_TOKEN") or None,
+        telegraph_access_token=values.get("TELEGRAPH_ACCESS_TOKEN") or None,
     )
 
 
@@ -272,5 +291,6 @@ def load_config(path: str | Path | None = None) -> Config:
     _validate(config)
     return Config(
         paths=config.paths, source=config.source, llm=config.llm, tiers=config.tiers,
-        english=config.english, telegram=config.telegram, secrets=_load_secrets(),
+        english=config.english, telegram=config.telegram, telegraph=config.telegraph,
+        secrets=_load_secrets(),
     )

@@ -112,7 +112,7 @@ def test_dry_run_without_secrets(delivery_config: Config, prepared: tuple[Path, 
 
 def test_document_disabled(delivery_config: Config, prepared: tuple[Path, FakeTelegram]) -> None:
     _, client = prepared
-    config = replace(delivery_config, telegram=TelegramConfig(send_report_file=False))
+    config = replace(delivery_config, telegram=TelegramConfig(send_report_file=False, delivery="messages"))
     assert send.send_digest(config) == 0
     assert len(client.messages) == 3 and not client.documents
 

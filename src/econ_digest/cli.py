@@ -13,11 +13,12 @@ from .fetch import FetchError
 from .logutil import configure_logging, redact
 from .state import AlreadyRunning, StateError
 
-COMMANDS = ("fetch", "parse", "signals", "analyze", "render", "send", "run", "telegram-setup")
+COMMANDS = ("fetch", "parse", "signals", "analyze", "render", "send", "run", "telegram-setup", "telegraph-setup")
 COMMAND_HELP = {
     "fetch": "下載 EPUB", "parse": "解析文章並儲存快取", "signals": "列出台灣相關詞彙",
     "analyze": "分析文章並產生摘要", "render": "產生 Markdown 與 HTML 報告",
     "send": "推送報告到 Telegram", "run": "執行完整流程", "telegram-setup": "設定 Telegram 私人聊天室",
+    "telegraph-setup": "設定 Telegraph 導讀頁面帳號",
 }
 
 

@@ -12,7 +12,8 @@ from .config import Config, SecretsConfig
 
 def redact(text: str, secrets: SecretsConfig | None = None) -> str:
     if secrets:
-        for value in (secrets.telegram_bot_token, secrets.telegram_chat_id, secrets.github_token):
+        for value in (secrets.telegram_bot_token, secrets.telegram_chat_id, secrets.github_token,
+                      secrets.telegraph_access_token):
             if value:
                 text = text.replace(value, "[已隱藏]")
     return re.sub(r"(https?://api\.telegram\.org/bot)[^/\s]+", r"\1[已隱藏]", text)
