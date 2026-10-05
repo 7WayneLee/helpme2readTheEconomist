@@ -40,7 +40,8 @@ def prompt_json(value: Any) -> str:
 
 
 def render_prompt(name: str, issue_date: str, **values: Any) -> tuple[str, str]:
-    source = (PROMPT_DIR / "_common.md").read_text(encoding="utf-8") + "\n" + (
+    source = (PROMPT_DIR / "_style.md").read_text(encoding="utf-8") + "\n" + (
+        PROMPT_DIR / "_common.md").read_text(encoding="utf-8") + "\n" + (
         PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8")
     digest = hashlib.sha256(source.encode()).hexdigest()
     return Template(source).substitute(issue_date=issue_date, **values), digest

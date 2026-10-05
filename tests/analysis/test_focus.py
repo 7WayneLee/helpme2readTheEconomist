@@ -187,7 +187,7 @@ def test_changed_focus_reuses_unaffected_summary_units(analysis_config: Config, 
     digest = analyze_issue(source, analysis_config, client, workdir=cache)
     assert original.focus_ids == ["a0", "a1", "a2"] and digest.focus_ids == ["a0", "a1", "a13"]
     summary_calls = [(stage, {item["article_id"] for item in payload(prompt, "文章：")})
-                     for prompt, _, stage in client.calls]
+                     for prompt, _, stage in client.calls if stage.startswith("summarize_")]
     assert len(summary_calls) == 3
     assert ("summarize_a", {"a13"}) in summary_calls
     assert all(stage.startswith("summarize_") for stage, _ in summary_calls)
@@ -197,6 +197,9 @@ def test_changed_focus_reuses_unaffected_summary_units(analysis_config: Config, 
 def test_prompts_and_validation_use_author_stance() -> None:
     for path in PROMPT_DIR.glob("*.md"):
         content = path.read_text()
+        if path.name == "_style.md":
+            assert "絕對禁用「社論」二字" in content
+            continue
         if path.name == "_common.md":
             assert "不得寫「社論」" in content
             assert "經濟學人立場（Leaders）" in content

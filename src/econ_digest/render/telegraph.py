@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
-from ..models import Digest
+from ..models import Digest, Source
 from ..telegraph.nodes import Node, content_size, node, validate_nodes
 from ..telegram.format import blockquote, bold, check_html, escape, link, split_html, strip_tags, utf16_len
 from .common import (TAIWAN_TAG, Entry, clean_text, english_article, merged_leader_titles, metadata,
-                     ordered_brief, overview, sections, summary_fields, title, word_count_label)
+                     ordered_brief, overview, sections, summary_fields, title, word_count_label, source_labels)
 
 GROUPS = (("weekly", "本週導讀"), ("taiwan", "台灣"), ("focus", "本週焦點"), ("international", "國際"),
           ("topics", "財經・科技・文化"), ("english", "英文學習"))
@@ -51,18 +51,32 @@ def _field(label: str, values: list[str]) -> list[Node]:
 
 def article_nodes(digest: Digest, entry: Entry) -> list[Node]:
     if entry.summary.tier == "E":
-        return [node("p", node("b", clean_text(entry.classification.title_zh)), " — ", clean_text(entry.summary.headline_zh))]
-    result = [node("h4", clean_text(entry.classification.title_zh)), node("p", node("i", entry.article.title)),
-              node("p", metadata(entry))]
+        result = [node("p", node("b", clean_text(entry.classification.title_zh)), " — ", clean_text(entry.summary.headline_zh))]
+    else:
+        result = [node("h4", clean_text(entry.classification.title_zh)), node("p", node("i", entry.article.title)),
+                  node("p", metadata(entry))]
     if entry.classification.taiwan_level:
         result.extend(_field("與台灣的關聯", [entry.classification.taiwan_link or "未提供"]))
-    for label, values in summary_fields(entry.summary):
+        result.extend(sources_nodes(entry.classification.sources))
+    for label, values in summary_fields(entry.summary, headline=entry.summary.tier != "E"):
         result.extend(_field(label, values))
+        if label == "對台灣的意涵":
+            result.extend(sources_nodes(entry.summary.sources))
     if entry.summary.leader_stance:
         result.append(node("p", node("b", "經濟學人立場")))
         result.extend(node("p", node("i", value)) for value in merged_leader_titles(digest, entry))
         result.append(node("p", clean_text(entry.summary.leader_stance)))
     return result
+
+
+def sources_nodes(sources: list[Source]) -> list[Node]:
+    labels = source_labels(sources)
+    children: list[Node] = ["依據："]
+    for label, url in labels:
+        if len(children) > 1:
+            children.append("、")
+        children.append(node("a", label, href=url))
+    return [node("p", node("i", *children))] if labels else []
 
 
 def english_nodes(digest: Digest) -> list[Node]:

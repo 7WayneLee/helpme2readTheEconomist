@@ -23,7 +23,8 @@ from ..state import AlreadyRunning, load_state, run_lock, save_state, utc_now
 from ..telegraph import TelegraphClient, content_size
 from ..telegraph.publish import load_pages, publish_pages
 from ..telegram import TelegramClient
-from ..telegram.format import check_html, utf16_len
+from ..telegram.format import check_html, utf16_len, escape, link
+from ..research.cna import cna_url
 from . import add_issue_argument
 from .render import saved_issue_directory
 from .telegraph_setup import ensure_account
@@ -64,11 +65,25 @@ def _validate_messages(messages: list[str]) -> None:
             raise ValueError("Telegram 訊息超過 4000 個 UTF-16 單位；請重新 render")
 
 
+def fact_alert_message(digest: Digest) -> str | None:
+    alerts = [item for item in digest.fact_alerts if isinstance(item, dict)
+              and isinstance(item.get("fact"), str) and isinstance(item.get("suspected_new_value"), str)
+              and cna_url(item.get("evidence_url"))][:5]
+    if not alerts:
+        return None
+    lines = ["⚠️ 台灣事實檔可能需要更新："]
+    for item in alerts:
+        lines.append("• " + escape(item["fact"][:45]) + " → " + escape(item["suspected_new_value"][:70])
+                     + "（" + link(item["evidence_url"], "中央社") + "）")
+    return "\n".join([*lines, "（請確認）"])
+
+
 def _telegraph_messages(digest: Digest, pages: list, urls: dict[str, str], originals: list[str],
                         *, photo: bool, site_url: str | None = None) -> tuple[list[str], int]:
     summary = summary_message(digest, pages, urls, site_url=site_url)
+    alerts = [message] if (message := fact_alert_message(digest)) else []
     if not photo:
-        return [summary, *originals], 0
+        return [summary, *originals, *alerts], 0
     caption, separate = summary_caption(digest, pages, urls)
     if site_url:
         from ..telegram.format import link
@@ -77,7 +92,7 @@ def _telegraph_messages(digest: Digest, pages: list, urls: dict[str, str], origi
             caption += private
         else:
             separate = True
-    return [caption, *([summary] if separate else []), *originals], 1 if separate else -1
+    return [caption, *([summary] if separate else []), *originals, *alerts], 1 if separate else -1
 
 
 def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = False,
@@ -159,6 +174,8 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
         messages, summary_index = _telegraph_messages(digest, pages, urls, originals, photo=cover is not None, site_url=site_url)
     else:
         messages = json.loads((directory / "telegram_messages.json").read_text(encoding="utf-8"))
+        if alert := fact_alert_message(digest):
+            messages.append(alert)
     _validate_messages(messages)
     channel_id = config.secrets.telegram_channel_id
     channel_message = summary_message(digest, pages, urls) if telegraph and channel_id else None
@@ -181,7 +198,8 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
     report_path = directory / "report.html"
     report_bytes = report_path.read_bytes() if send_report else b""
     payload = ([[asdict(page) for page in pages], originals, chat_id, send_report, channel_id, site_url, cover_url,
-                asdict(config.telegraph), "telegraph", hashlib.sha256(cover.data).hexdigest() if cover else None] if telegraph
+                asdict(config.telegraph), "telegraph", hashlib.sha256(cover.data).hexdigest() if cover else None,
+                digest.fact_alerts] if telegraph
                else [messages, chat_id, send_report])
     fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode("utf-8") + report_bytes).hexdigest()
     progress_path = directory / "telegram_progress.json"

@@ -38,7 +38,7 @@ def test_digest_normalisation_cache_and_persistence(analysis_config: Config, tmp
     assert digest.classifications["c1"].tier == "skip"
     assert digest.english.word_count == 800 and digest.english.reading_minutes == 6
     assert digest.english.vocabulary[0].example_en == "A policy needs resolve and careful planning."
-    assert len(digest.llm_calls) == 7 and all(stat.ok for stat in digest.llm_calls)
+    assert len(digest.llm_calls) == 11 and all(stat.ok for stat in digest.llm_calls)
     saved = analysis_config.paths.data_dir / "issues" / "te_2026.10.03" / "digest.json"
     assert load_json(saved, Digest).to_dict() == digest.to_dict()
     import json

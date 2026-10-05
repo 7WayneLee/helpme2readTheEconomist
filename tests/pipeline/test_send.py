@@ -177,3 +177,14 @@ def test_pages_only_rejected_in_messages_mode(delivery_config: Config, dry_run: 
     output = capsys.readouterr().out
     assert "--pages-only 僅適用於 Telegraph 模式" in output
     assert "telegram.delivery" in output
+
+
+def test_fact_alert_private_message_in_messages_mode(delivery_config, delivery_digest, prepared):
+    directory, client = prepared
+    delivery_digest.fact_alerts = [{'fact': '合成舊值', 'suspected_new_value': '合成新值',
+                                    'evidence_url': 'https://www.cna.com.tw/news/aipl/202610010001.aspx'}]
+    save_json(directory / 'digest.json', delivery_digest)
+    assert send.send_digest(delivery_config, log=lambda _: None) == 0
+    assert len(client.messages) == 4
+    assert client.messages[-1].startswith('⚠️ 台灣事實檔可能需要更新：')
+    assert 'https://www.cna.com.tw/news/' in client.messages[-1] and '（請確認）' in client.messages[-1]

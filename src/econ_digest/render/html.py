@@ -8,16 +8,24 @@ from collections.abc import Callable
 from html import escape
 from importlib.resources import files
 
-from ..models import Digest
+from ..models import Digest, Source
 from ..images import ArticleImages, ImageBlob, IssueImages, PositionedImage
 from ..taxonomy import TIERS
 from .common import (TAIWAN_TAG, Entry, clean_text, english_article, generation_time, merged_leader_titles,
                      metadata, ordered_brief, overview, sections, summary_fields, title,
-                     word_count_label)
+                     word_count_label, source_labels)
 
 
 def paragraph(value: str) -> str:
     return f"<p>{escape(clean_text(value))}</p>"
+
+
+def sources_html(sources: list[Source]) -> str:
+    labels = source_labels(sources)
+    if not labels:
+        return ""
+    links = "、".join(f'<a href="{escape(url, quote=True)}">{escape(label)}</a>' for label, url in labels)
+    return '<p class="sources"><small>依據：' + links + "</small></p>"
 
 
 def bullets(values: list[str]) -> str:
@@ -73,6 +81,7 @@ def article_html(digest: Digest, entry: Entry, images: IssueImages | None = None
     relation = ""
     if level:
         relation = "<h5>與台灣的關聯</h5>" + paragraph(clean_text(entry.classification.taiwan_link or "未提供"))
+        relation += sources_html(entry.classification.sources)
     body = ""
     for label, values in fields:
         body += f"<h5>{label}</h5>"
@@ -82,6 +91,8 @@ def article_html(digest: Digest, entry: Entry, images: IssueImages | None = None
                                    entry.classification.title_zh + " 插圖")
         else:
             body += bullets(values) if len(values) > 1 else paragraph(values[0])
+        if label == "對台灣的意涵":
+            body += sources_html(entry.summary.sources)
     if entry.summary.leader_stance:
         body += "<h5>經濟學人立場</h5>" + "".join(paragraph(v) for v in merged_leader_titles(digest, entry))
         body += paragraph(clean_text(entry.summary.leader_stance))

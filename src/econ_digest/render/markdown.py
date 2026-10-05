@@ -4,14 +4,19 @@ from __future__ import annotations
 
 from html import escape
 
-from ..models import Digest
+from ..models import Digest, Source
 from .common import (TAIWAN_TAG, Entry, clean_text, english_article, generation_time, merged_leader_titles,
                      metadata, ordered_brief, overview, sections, summary_fields, title,
-                     word_count_label)
+                     word_count_label, source_labels)
 
 
 def text(value: str) -> str:
     return escape(clean_text(value), quote=False).replace("\\", "\\\\").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]").replace("`", "\\`")
+
+
+def sources_line(sources: list[Source]) -> list[str]:
+    labels = source_labels(sources)
+    return ["依據：" + "、".join(f"[{text(label)}]({url})" for label, url in labels), ""] if labels else []
 
 
 def article_lines(digest: Digest, entry: Entry) -> list[str]:
@@ -20,10 +25,13 @@ def article_lines(digest: Digest, entry: Entry) -> list[str]:
               f"{text(metadata(entry))}{level}", ""]
     if entry.classification.taiwan_level:
         result.extend(["**與台灣的關聯**", "", text(entry.classification.taiwan_link or "未提供"), ""])
+        result.extend(sources_line(entry.classification.sources))
     for label, values in summary_fields(entry.summary):
         result.extend([f"**{label}**", ""])
         result.extend([f"- {text(value)}" for value in values] if len(values) > 1 else [text(values[0])])
         result.append("")
+        if label == "對台灣的意涵":
+            result.extend(sources_line(entry.summary.sources))
     if entry.summary.leader_stance:
         result.extend(["**經濟學人立場**", "",
                        *[f"*{text(value)}*" for value in merged_leader_titles(digest, entry)],

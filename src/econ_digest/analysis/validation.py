@@ -119,13 +119,11 @@ def validate_summary(item: dict[str, Any], article: Article, tier: str, *, leade
         if not stance.startswith("立場分析"):
             raise ValueError("stance must be explicitly labelled 立場分析")
         length(stance, "stance", 65, 280)
-        strings(item.get("taiwan_implications"), "taiwan_implications", 2, 4)
         strings(item.get("further_questions"), "further_questions", 1, 2)
         length(item, "A total", 800, 2700)
     elif tier == "B":
         strings(item.get("key_points"), "key_points", 4, 6)
         validate_argument(item.get("argument"), tier=tier)
-        strings(item.get("taiwan_implications"), "taiwan_implications", 1, 3)
         length(item, "B total", 400, 1250)
     elif tier == "C":
         strings(item.get("key_points"), "key_points", 3, 5)
@@ -139,6 +137,7 @@ def validate_summary(item: dict[str, Any], article: Article, tier: str, *, leade
         length(headline, "headline_zh", 20, 85)
     else:
         raise ValueError(f"Unsupported summary tier: {tier}")
+    strings(item.get("taiwan_implications", []), "taiwan_implications", 0, 3)
     if leader:
         stance = text(item.get("leader_stance"), "leader_stance")
         if not stance.startswith("作者主張："):

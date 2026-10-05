@@ -6,6 +6,7 @@ from dataclasses import fields, replace
 from typing import Any
 
 from ..config import Config
+from ..facts import load_taiwan_facts
 from ..models import Article, ArticleSummary, Classification, Issue
 from ..taxonomy import TIER_ORDER
 from .prompts import Unit, first_words, make_unit, numbered_text, prompt_json, split_units
@@ -19,6 +20,8 @@ def summary_payload(article: Article, classification: Classification, leader: Ar
     payload: dict[str, Any] = {"article_id": article.id, "title": article.title, "rubric": article.rubric,
                                "section": article.section, "tier": tier, "taiwan_level": classification.taiwan_level,
                                "taiwan_link": classification.taiwan_link}
+    if tier == "A" or (tier == "B" and classification.taiwan_level >= 1):
+        payload["taiwan_facts"] = load_taiwan_facts()
     if tier in {"A", "B", "C"}:
         payload["text"] = numbered_text(article.paragraphs)
     elif tier == "D":

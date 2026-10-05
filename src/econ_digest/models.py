@@ -112,6 +112,14 @@ class TaiwanSignals(JsonModel):
 
 
 @dataclass
+class Source(JsonModel):
+    outlet: str
+    date: str
+    title: str
+    url: str
+
+
+@dataclass
 class Classification(JsonModel):
     article_id: str
     taiwan_level: int
@@ -121,6 +129,7 @@ class Classification(JsonModel):
     title_zh: str
     companion_id: str | None = None
     tier: str = ""
+    sources: list[Source] = field(default_factory=list)
 
 
 @dataclass
@@ -154,6 +163,7 @@ class ArticleSummary(JsonModel):
     further_questions: list[str] = field(default_factory=list)
     leader_stance: str | None = None
     model: str | None = None
+    sources: list[Source] = field(default_factory=list)
 
 
 @dataclass
@@ -233,3 +243,4 @@ class Digest(JsonModel):
     llm_calls: list[LLMCallStat] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     focus_ids: list[str] = field(default_factory=list)
+    fact_alerts: list[dict] = field(default_factory=list)

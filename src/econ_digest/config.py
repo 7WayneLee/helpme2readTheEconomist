@@ -16,6 +16,7 @@ from .taxonomy import CATEGORIES, KINDS, TIER_ORDER
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
 DEFAULT_MODELS = ("gemini-3.8-flash-high", "claude-sonnet-4-6")
+KEY_MODELS = ("claude-opus-4-6-thinking", "gemini-3.8-flash-high")
 
 
 class ConfigError(ValueError):
@@ -40,13 +41,16 @@ class ModelsConfig:
     classify: tuple[str, ...] = DEFAULT_MODELS
     pair: tuple[str, ...] = DEFAULT_MODELS
     focus: tuple[str, ...] = DEFAULT_MODELS
-    summarize_a: tuple[str, ...] = DEFAULT_MODELS
+    summarize_a: tuple[str, ...] = KEY_MODELS
     summarize_b: tuple[str, ...] = DEFAULT_MODELS
     summarize_c: tuple[str, ...] = DEFAULT_MODELS
     summarize_d: tuple[str, ...] = DEFAULT_MODELS
     summarize_e: tuple[str, ...] = DEFAULT_MODELS
     brief: tuple[str, ...] = DEFAULT_MODELS
     english: tuple[str, ...] = DEFAULT_MODELS
+    edit: tuple[str, ...] = KEY_MODELS
+    ground: tuple[str, ...] = KEY_MODELS
+    facts: tuple[str, ...] = KEY_MODELS
 
 
 @dataclass(frozen=True)

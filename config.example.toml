@@ -19,19 +19,22 @@ no_account_wait_seconds = 900 # 無可用帳號時的等待秒數
 # 依序嘗試；第一個模型是主要模型。
 [llm.models]
 classify = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 分類
-pair = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 配對社論與報導
+pair = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 配對經濟學人立場與報導
 focus = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 選出本週最重要的國際焦點
-summarize_a = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # A 級摘要
+summarize_a = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"] # 台灣 T1 與本週焦點深度解析
 summarize_b = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # B 級摘要
 summarize_c = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # C 級摘要
 summarize_d = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # D 級摘要
 summarize_e = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # E 級摘要
 brief = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 本週要聞
 english = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 英語學習
+edit = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"] # 標題與要聞編修
+ground = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"] # 台灣關聯查證
+facts = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"] # 台灣事實檔更新提醒
 
 [tiers]
-cover_companion_min = "B" # 封面社論對應報導至少達到的深度
-leader_companion_min = "C" # 其他社論對應報導至少達到的深度
+cover_companion_min = "B" # 封面經濟學人立場對應報導至少達到的深度
+leader_companion_min = "C" # 其他經濟學人立場對應報導至少達到的深度
 taiwan = { "1" = "A", "2" = "B", "3" = "C" } # 台灣相關程度對應摘要深度
 category = { "intl.us" = "C", "intl.china" = "C", "intl.asia" = "D", "intl.europe" = "D", "finance" = "D", "tech" = "D", "intl.other" = "E", "science" = "E", "culture" = "E" } # 一般分類的深度
 min_tier_by_kind = { briefing = "C" } # 特定文章種類至少達到的深度

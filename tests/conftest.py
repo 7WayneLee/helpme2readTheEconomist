@@ -18,14 +18,26 @@ from econ_digest.models import Article, Issue
 
 
 @pytest.fixture(autouse=True)
+def offline_analysis_research(monkeypatch: pytest.MonkeyPatch) -> None:
+    from econ_digest.analysis import pipeline
+    from econ_digest.research.cna import CNAClient
+
+    class OfflineCNA(CNAClient):
+        def search(self, query: str):
+            return []
+
+    monkeypatch.setattr(pipeline, "CNAClient", OfflineCNA)
+
+
+@pytest.fixture(autouse=True)
 def disable_live_delivery(monkeypatch: pytest.MonkeyPatch) -> None:
     """Delivery tests must inject fake openers and never publish real pages."""
     original = OpenerDirector.open
 
     def guarded_open(self: OpenerDirector, fullurl: Request | str, *args: object, **kwargs: object):
         url = fullurl.full_url if isinstance(fullurl, Request) else fullurl
-        if url.startswith(("https://api.telegra.ph/", "https://api.telegram.org/")):
-            pytest.fail("測試禁止連線至 Telegraph 或 Telegram；請使用假 opener")
+        if url.startswith(("http://", "https://")):
+            pytest.fail("測試禁止連線；請使用假 opener")
         return original(self, fullurl, *args, **kwargs)
 
     monkeypatch.setattr(OpenerDirector, "open", guarded_open)

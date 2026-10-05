@@ -10,7 +10,7 @@ from econ_digest import models
 from econ_digest.models import (
     Argument, Article, ArticleSummary, BriefItem, Classification, Digest, EnglishPick,
     Issue, LLMCallStat, PhraseItem, QuizItem, Quote, SentenceAnalysis, TaiwanSignals,
-    VocabItem, WeekBrief, load_json, save_json,
+    VocabItem, WeekBrief, Source, load_json, save_json,
 )
 from econ_digest.state import AlreadyRunning, StateError, StateStore, load_state, run_lock, save_state
 
@@ -19,6 +19,7 @@ def all_models() -> list[models.JsonModel]:
     article = Article("a", 0, "Synthetic", None, "Synthetic title", None, None, ["Invented text."], 2, "article")
     issue = Issue("2026.10.03", "https://example.invalid", "2026-10-03T00:00:00+00:00", [article])
     signals = TaiwanSignals(["Taiwan"], ["chips"], 1, ["Taiwan makes invented chips."])
+    source = Source("中央社", "2026-10-01", "合成來源", "https://www.cna.com.tw/news/aipl/202610010001.aspx")
     classification = Classification("a", 1, True, "台灣是主題。", "tech", "合成標題", "b", "A")
     quote = Quote("Synthetic quote.", "合成引言。")
     argument = Argument("主張", ["證據"], ["反論"], "結論")
@@ -33,7 +34,9 @@ def all_models() -> list[models.JsonModel]:
     english = EnglishPick("a", "合成原因", "B1", 800, 4, "閱讀前", [vocabulary], [phrase], [sentence], ["寫作技巧"], [quiz])
     stat = LLMCallStat("classify", "synthetic-model", True, 42, 1.25)
     digest = Digest("2026.10.03", "2026-10-04T00:00:00Z", issue, {"a": classification}, {"a": summary}, brief, english, [stat], ["合成警告"])
-    return [article, issue, signals, classification, quote, argument, summary, brief_item, brief,
+    classification.sources = [source]
+    summary.sources = [source]
+    return [article, issue, signals, source, classification, quote, argument, summary, brief_item, brief,
             vocabulary, phrase, sentence, quiz, english, stat, digest]
 
 
@@ -59,11 +62,22 @@ def test_nested_types_and_optional_defaults_are_restored() -> None:
     assert isinstance(restored.classifications["a"], Classification)
     assert isinstance(restored.summaries["a"].argument, Argument)
     assert isinstance(restored.summaries["a"].quotes[0], Quote)
+    assert isinstance(restored.classifications["a"].sources[0], Source)
+    assert isinstance(restored.summaries["a"].sources[0], Source)
     assert restored.english is not None and isinstance(restored.english.vocabulary[0], VocabItem)
     data = digest.to_dict()
     data["week_brief"] = data["english"] = None
     assert Digest.from_dict(data).english is None
     assert ArticleSummary.from_dict({"article_id": "a", "tier": "E", "headline_zh": "一句話"}).key_points == []
+
+
+def test_source_and_fact_alert_defaults_in_old_digests() -> None:
+    data = all_models()[-1].to_dict()
+    data.pop("fact_alerts")
+    data["classifications"]["a"].pop("sources")
+    data["summaries"]["a"].pop("sources")
+    old = Digest.from_dict(data)
+    assert old.fact_alerts == old.classifications["a"].sources == old.summaries["a"].sources == []
 
 
 def test_digest_focus_order_and_old_json(tmp_path: Path) -> None:

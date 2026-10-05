@@ -15,11 +15,14 @@ from ..fetch import issue_directory
 from ..llm import GwgClient, LLMClient, LLMError, run_parallel
 from ..models import ArticleSummary, Classification, Digest, EnglishPick, Issue, WeekBrief, save_json
 from ..signals import find_taiwan_signals
+from ..research.cna import CNAClient
 from ..zhtw import lint_zh_tw, normalize_tree
 from .brief import brief_unit
 from .cache import SKIP_KEYS, UnitResult, UnitRunner, cache_focus_fallback
 from .classification import apply_tiers, classify_units, fallback_classification, fixed_classification, pair_unit
 from .english import guide_unit, pick_unit
+from .editor import edit_digest
+from .grounding import check_facts, ground_digest
 from .focus import apply_focus, fallback_focus, focus_unit
 from .prompts import Unit
 from .summaries import summary_model, summary_units
@@ -211,6 +214,10 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
             warnings.append(f"{result.unit.tier} 級摘要失敗（{result.error_kind}）：" + "、".join(result.unit.article_ids))
     if not pick:
         warnings.append("沒有符合篇幅與文章種類條件的英文選文。")
+    edit_digest(issue, classifications, summaries, week_brief, config, runner, warnings)
+    cna = CNAClient(config.paths.data_dir / "research")
+    ground_digest(issue, classifications, summaries, focus_ids, config, runner, cna, warnings)
+    fact_alerts = check_facts(issue.issue_date, config, runner, cna, warnings)
     runner.total_units += english_runner.total_units
     runner.failed_units += english_runner.failed_units
     runner.stats.extend(english_runner.stats)
@@ -221,7 +228,7 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
         warnings.append("本次僅執行指定範圍的摘要，供提示詞調整使用。")
     digest = Digest(issue.issue_date, datetime.now(timezone.utc).isoformat(), issue, classifications, summaries,
                     week_brief, english, sorted(runner.stats, key=lambda stat: (stat.stage, stat.model)), warnings,
-                    focus_ids=focus_ids)
+                    focus_ids=focus_ids, fact_alerts=fact_alerts)
     # Source articles and diagnostic strings are not model-authored Chinese.
     digest = Digest.from_dict(normalize_tree(digest.to_dict(), skip_keys=SKIP_KEYS | {"issue", "warnings", "llm_calls"}))
     findings = [finding for value in _zh_strings(digest.to_dict()) for finding in lint_zh_tw(value)]

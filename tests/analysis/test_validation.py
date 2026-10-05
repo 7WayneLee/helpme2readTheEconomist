@@ -14,9 +14,9 @@ def test_valid_summary_each_tier(tier: str) -> None:
 
 
 @pytest.mark.parametrize("tier,field", [("A", "background"), ("A", "structure"), ("A", "argument"),
-                                       ("A", "key_data"), ("A", "stance"), ("A", "taiwan_implications"),
+                                       ("A", "key_data"), ("A", "stance"),
                                        ("A", "further_questions"), ("B", "key_points"), ("B", "argument"),
-                                       ("B", "taiwan_implications"), ("C", "key_points"), ("D", "summary_zh"),
+                                       ("C", "key_points"), ("D", "summary_zh"),
                                        ("E", "headline_zh")])
 def test_missing_summary_fields(tier: str, field: str) -> None:
     data = summary("a1", tier)

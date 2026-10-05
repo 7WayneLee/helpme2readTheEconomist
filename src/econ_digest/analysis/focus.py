@@ -55,7 +55,7 @@ def focus_unit(issue: Issue, classifications: dict[str, Classification], config:
         return None
     ids = {article.id for article in candidates}
     cover, leaders = companion_ids(issue, classifications)
-    return make_unit("focus", issue.issue_date, sorted(ids), config.llm.models.focus,
+    unit = make_unit("focus", issue.issue_date, sorted(ids), config.llm.models.focus,
                      lambda data: validate_focus(data, ids, config.analysis.focus_count),
                      count=min(config.analysis.focus_count, len(candidates)), candidates=prompt_json([
                          {"id": article.id, "section": article.section, "kind": article.kind,
@@ -64,6 +64,9 @@ def focus_unit(issue: Issue, classifications: dict[str, Classification], config:
                           "category": classifications[article.id].category, "tier": classifications[article.id].tier,
                           "word_count": article.word_count, "is_cover_companion": article.id in cover,
                           "has_merged_leader": article.id in leaders} for article in candidates]))
+    if unit.prompt_bytes > 90_000:
+        raise ValueError("focus exceeds 90,000 prompt bytes")
+    return unit
 
 
 def fallback_focus(issue: Issue, classifications: dict[str, Classification], count: int) -> dict[str, Any]:

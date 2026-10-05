@@ -93,6 +93,22 @@ def answer(prompt: str, model: str, stage: str) -> dict[str, Any]:
         return {"article_id": payload(prompt.split("最近最多八次選文：")[0], "候選：")[0]["id"], "reason_zh": "結構清楚，單字實用。"}
     if stage == "english_guide":
         return guide()
+    if stage == "edit":
+        return {"items": [{key: value for key, value in item.items()
+                           if key in {"id", "title_zh", "headline_zh", "text_zh"}}
+                          for item in payload(prompt, "編修項目：")]}
+    if stage == "ground_queries":
+        return {"articles": [{"article_id": item["article_id"], "queries": ["台灣 合成查證"]}
+                             for item in payload(prompt, "查證文章：")]}
+    if stage == "ground":
+        return {"articles": [{"article_id": item["article_id"],
+                               "taiwan_level": item["provisional_taiwan_level"],
+                               "taiwan_link": {"text_zh": "台灣是合成主題。", "basis": ["article"]}
+                               if item["provisional_taiwan_level"] else None,
+                               "taiwan_implications": []}
+                              for item in payload(prompt, "查證文章及各篇證據：")]}
+    if stage == "facts":
+        return {"alerts": []}
     raise AssertionError(stage)
 
 

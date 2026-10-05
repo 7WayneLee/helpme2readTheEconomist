@@ -14,7 +14,8 @@ from ..models import LLMCallStat, save_json
 from ..zhtw import DEFAULT_SKIP_KEYS
 from .prompts import Unit
 
-SKIP_KEYS = DEFAULT_SKIP_KEYS | {"id", "focus_ids", "question", "section", "kind", "title", "source_url", "issue_date"}
+SKIP_KEYS = DEFAULT_SKIP_KEYS | {"id", "focus_ids", "question", "section", "kind", "title", "source_url", "issue_date",
+                                "sources", "url", "evidence_url", "basis", "date"}
 CACHE_FORMAT_VERSION = 2
 
 
