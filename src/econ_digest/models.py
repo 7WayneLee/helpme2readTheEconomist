@@ -232,3 +232,4 @@ class Digest(JsonModel):
     english: EnglishPick | None
     llm_calls: list[LLMCallStat] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    focus_ids: list[str] = field(default_factory=list)

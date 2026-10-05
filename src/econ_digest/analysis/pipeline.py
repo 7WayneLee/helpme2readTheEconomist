@@ -16,9 +16,10 @@ from ..models import ArticleSummary, Classification, Digest, EnglishPick, Issue,
 from ..signals import find_taiwan_signals
 from ..zhtw import lint_zh_tw, normalize_tree
 from .brief import brief_unit
-from .cache import SKIP_KEYS, UnitResult, UnitRunner
+from .cache import SKIP_KEYS, UnitResult, UnitRunner, cache_focus_fallback
 from .classification import apply_tiers, classify_units, fallback_classification, fixed_classification, pair_unit
 from .english import guide_unit, pick_unit
+from .focus import apply_focus, fallback_focus, focus_unit
 from .prompts import Unit
 from .summaries import summary_model, summary_units
 
@@ -99,9 +100,23 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
             for item in result.data["pairs"]:
                 classifications[item["article_id"]].companion_id = item["companion_id"]
         else:
-            warnings.append(f"社論配對失敗（{result.error_kind}）：社論保留獨立摘要。")
+            warnings.append(f"經濟學人立場配對失敗（{result.error_kind}）：立場文章保留獨立摘要。")
     apply_tiers(issue.articles, classifications, config.tiers)
-    units = summary_units(issue, classifications, config, only_tier=only_tier, limit=limit)
+    base_tiers = {identifier: classification.tier for identifier, classification in classifications.items()}
+    focus = focus_unit(issue, classifications, config)
+    focus_ids: list[str] = []
+    recovered_focus_failure = 0
+    if focus:
+        result = runner.run(focus)
+        data = result.data
+        if data is None:
+            data = fallback_focus(issue, classifications, config.analysis.focus_count)
+            cache_focus_fallback(workdir, result, data)
+            recovered_focus_failure = 1
+        if result.error_kind:
+            warnings.append(f"本週焦點選文失敗（{result.error_kind}）：依封面對應文章、專題、立場對應文章與篇幅採用固定排序。")
+        focus_ids = apply_focus(data, classifications)
+    units = summary_units(issue, classifications, config, only_tier=only_tier, limit=limit, base_tiers=base_tiers)
     brief = brief_unit(issue, config)
     if brief:
         units.append(brief)
@@ -149,12 +164,14 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
             warnings.append(f"{result.unit.tier} 級摘要失敗（{result.error_kind}）：" + "、".join(result.unit.article_ids))
     if not pick:
         warnings.append("沒有符合篇幅與文章種類條件的英文選文。")
-    if runner.total_units and runner.failed_units / runner.total_units > 0.30:
-        raise AnalysisError(f"分析失敗比例超過 30%（{runner.failed_units}/{runner.total_units}）；請稍後重試。")
+    failed_units = runner.failed_units - recovered_focus_failure
+    if runner.total_units and failed_units / runner.total_units > 0.30:
+        raise AnalysisError(f"分析失敗比例超過 30%（{failed_units}/{runner.total_units}）；請稍後重試。")
     if only_tier is not None or limit is not None:
         warnings.append("本次僅執行指定範圍的摘要，供提示詞調整使用。")
     digest = Digest(issue.issue_date, datetime.now(timezone.utc).isoformat(), issue, classifications, summaries,
-                    week_brief, english, sorted(runner.stats, key=lambda stat: (stat.stage, stat.model)), warnings)
+                    week_brief, english, sorted(runner.stats, key=lambda stat: (stat.stage, stat.model)), warnings,
+                    focus_ids=focus_ids)
     # Source articles and diagnostic strings are not model-authored Chinese.
     digest = Digest.from_dict(normalize_tree(digest.to_dict(), skip_keys=SKIP_KEYS | {"issue", "warnings", "llm_calls"}))
     findings = [finding for value in _zh_strings(digest.to_dict()) for finding in lint_zh_tw(value)]

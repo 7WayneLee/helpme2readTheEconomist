@@ -66,6 +66,18 @@ def test_nested_types_and_optional_defaults_are_restored() -> None:
     assert ArticleSummary.from_dict({"article_id": "a", "tier": "E", "headline_zh": "一句話"}).key_points == []
 
 
+def test_digest_focus_order_and_old_json(tmp_path: Path) -> None:
+    digest = all_models()[-1]
+    digest.focus_ids = ["third", "first", "second"]
+    path = tmp_path / "digest.json"
+    save_json(path, digest)
+    assert load_json(path, Digest).focus_ids == ["third", "first", "second"]
+    old = digest.to_dict()
+    del old["focus_ids"]
+    assert Digest.from_dict(old).focus_ids == []
+    assert Digest.from_dict(old).focus_ids is not Digest.from_dict(old).focus_ids
+
+
 def test_atomic_json_unicode_and_failure_preserves_old_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = tmp_path / "state.json"
     save_json(path, {"正體中文": "台灣"})

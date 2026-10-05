@@ -138,8 +138,8 @@ def validate_summary(item: dict[str, Any], article: Article, tier: str, *, leade
         raise ValueError(f"Unsupported summary tier: {tier}")
     if leader:
         stance = text(item.get("leader_stance"), "leader_stance")
-        if not stance.startswith("社論主張："):
-            raise ValueError("leader_stance must start with 社論主張：")
+        if not stance.startswith("作者主張："):
+            raise ValueError("leader_stance must start with 作者主張：")
         if not 2 <= len(re.findall(r"[。！？]", stance)) <= 3:
             raise ValueError("leader_stance requires 2–3 sentences")
 

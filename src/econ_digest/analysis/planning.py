@@ -11,6 +11,7 @@ from .brief import brief_unit
 from .cache import read_cache
 from .classification import apply_tiers, classify_units, fallback_classification, fixed_classification, pair_unit
 from .english import english_candidates, guide_unit, pick_unit
+from .focus import apply_focus, fallback_focus, focus_unit
 from .prompts import Unit
 from .summaries import summary_units
 
@@ -40,7 +41,17 @@ def plan_issue(issue: Issue, config: Config, *, workdir: Path,
         else:
             estimated = True
     apply_tiers(issue.articles, classifications, config.tiers)
-    units.extend(summary_units(issue, classifications, config, only_tier=only_tier, limit=limit))
+    base_tiers = {identifier: classification.tier for identifier, classification in classifications.items()}
+    focus = focus_unit(issue, classifications, config)
+    if focus:
+        units.append(focus)
+        cached = read_cache(workdir, focus)
+        if cached and cached.data:
+            apply_focus(cached.data, classifications)
+        else:
+            estimated = True
+            apply_focus(fallback_focus(issue, classifications, config.analysis.focus_count), classifications)
+    units.extend(summary_units(issue, classifications, config, only_tier=only_tier, limit=limit, base_tiers=base_tiers))
     brief = brief_unit(issue, config)
     if brief:
         units.append(brief)

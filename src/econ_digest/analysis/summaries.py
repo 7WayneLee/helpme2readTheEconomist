@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 from typing import Any
 
 from ..config import Config
@@ -33,7 +33,8 @@ def summary_payload(article: Article, classification: Classification, leader: Ar
 
 
 def summary_units(issue: Issue, classifications: dict[str, Classification], config: Config, *,
-                  only_tier: str | None = None, limit: int | None = None) -> list[Unit]:
+                  only_tier: str | None = None, limit: int | None = None,
+                  base_tiers: dict[str, str] | None = None) -> list[Unit]:
     by_id = {article.id: article for article in issue.articles}
     leaders = {classification.companion_id: by_id[classification.article_id]
                for classification in classifications.values() if classification.companion_id}
@@ -41,11 +42,17 @@ def summary_units(issue: Issue, classifications: dict[str, Classification], conf
                 and (only_tier is None or classifications[article.id].tier == only_tier)]
     if limit is not None:
         selected = selected[:limit]
+    selected_ids = {article.id for article in selected}
+    baseline = {identifier: replace(classification, tier=base_tiers[identifier])
+                for identifier, classification in classifications.items()} if base_tiers is not None else classifications
     units: list[Unit] = []
     for tier in TIER_ORDER:
         tier_articles = [article for article in selected if classifications[article.id].tier == tier]
+        if not tier_articles:
+            continue
 
-        def build(batch: list[Article], current_tier: str = tier) -> Unit:
+        def build(batch: list[Article], current_tier: str = tier,
+                  inputs: dict[str, Classification] = classifications) -> Unit:
             ids = {article.id for article in batch}
 
             def validate(data: dict[str, Any]) -> None:
@@ -56,10 +63,22 @@ def summary_units(issue: Issue, classifications: dict[str, Classification], conf
             return make_unit(f"summarize_{current_tier.lower()}", issue.issue_date, sorted(ids),
                              getattr(config.llm.models, f"summarize_{current_tier.lower()}"), validate,
                              tier=current_tier, articles=prompt_json([
-                                 summary_payload(article, classifications[article.id], leaders.get(article.id))
+                                 summary_payload(article, inputs[article.id], leaders.get(article.id))
                                  for article in batch]))
 
-        units.extend(split_units(tier_articles, build, max_items=BATCH_LIMITS[tier], max_bytes=90_000))
+        if base_tiers is None or tier == "A":
+            units.extend(split_units(tier_articles, build, max_items=BATCH_LIMITS[tier], max_bytes=90_000))
+        else:
+            # Partition by the original tier before removing promoted articles;
+            # a changed focus must not shift every later summary batch.
+            original = [article for article in issue.articles if baseline[article.id].tier == tier]
+            batches = split_units(original, lambda batch: build(batch, tier, baseline),
+                                  max_items=BATCH_LIMITS[tier], max_bytes=90_000)
+            for batch in batches:
+                remaining = [article for article in original if article.id in batch.article_ids
+                             and article.id in selected_ids and classifications[article.id].tier == tier]
+                if remaining:
+                    units.append(build(remaining))
     return units
 
 

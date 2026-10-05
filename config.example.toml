@@ -19,6 +19,7 @@ no_account_wait_seconds = 900 # 無可用帳號時的等待秒數
 [llm.models]
 classify = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 分類
 pair = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 配對社論與報導
+focus = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 選出本週最重要的國際焦點
 summarize_a = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # A 級摘要
 summarize_b = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # B 級摘要
 summarize_c = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # C 級摘要
@@ -34,6 +35,9 @@ taiwan = { "1" = "A", "2" = "B", "3" = "C" } # 台灣相關程度對應摘要深
 category = { "intl.us" = "C", "intl.china" = "C", "intl.asia" = "D", "intl.europe" = "D", "finance" = "D", "tech" = "D", "intl.other" = "E", "science" = "E", "culture" = "E" } # 一般分類的深度
 min_tier_by_kind = { briefing = "C" } # 特定文章種類至少達到的深度
 force_tier_by_kind = { letters = "E", obituary = "E" } # 強制指定的深度
+
+[analysis]
+focus_count = 3 # 台灣專區以外，升為 A 級深度解析的焦點篇數
 
 [english]
 level = "全民英檢中級（多益約 550–780，CEFR B1）" # 目標閱讀程度

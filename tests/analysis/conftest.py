@@ -54,7 +54,7 @@ def summary(identifier: str, tier: str, *, leader: bool = False) -> dict[str, An
     elif tier == "D":
         result.update(summary_zh=ZH * 2)
     if leader:
-        result["leader_stance"] = "社論主張：政府必須重新檢視政策。企業應審慎評估成本。"
+        result["leader_stance"] = "作者主張：政府必須重新檢視政策。企業應審慎評估成本。"
     return result
 
 
@@ -77,7 +77,11 @@ def answer(prompt: str, model: str, stage: str) -> dict[str, Any]:
                                "taiwan_link": None, "category": "culture", "title_zh": "政策改變的成本"}
                               for item in payload(prompt, "文章：")]}
     if stage == "pair":
-        return {"pairs": [{"article_id": item["id"], "companion_id": None} for item in payload(prompt.split("候選報導：")[0], "社論：")]}
+        return {"pairs": [{"article_id": item["id"], "companion_id": None} for item in payload(prompt.split("候選報導：")[0], "經濟學人立場：")]}
+    if stage == "focus":
+        count = int(re.search(r"最值得深入理解的 (\d+) 篇", prompt)[1])
+        return {"focus": [{"article_id": item["id"], "reason": "本週具有全球重要性，值得深入解析。"}
+                          for item in payload(prompt, "候選：")[:count]]}
     if stage.startswith("summarize_"):
         return {"articles": [summary(item["article_id"], item["tier"], leader="leader" in item)
                               for item in payload(prompt, "文章：")]}

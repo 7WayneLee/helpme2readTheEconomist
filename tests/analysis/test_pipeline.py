@@ -11,7 +11,7 @@ from econ_digest.config import Config
 from econ_digest.llm import FakeLLMClient, GwgClient, LLMError
 from econ_digest.models import Digest, Issue, load_json
 
-from conftest import answer, article, issue
+from conftest import BODY, answer, article, issue
 
 
 def test_digest_normalisation_cache_and_persistence(analysis_config: Config, tmp_path: Path,
@@ -38,7 +38,7 @@ def test_digest_normalisation_cache_and_persistence(analysis_config: Config, tmp
     assert digest.classifications["c1"].tier == "skip"
     assert digest.english.word_count == 800 and digest.english.reading_minutes == 6
     assert digest.english.vocabulary[0].example_en == "A policy needs resolve and careful planning."
-    assert len(digest.llm_calls) == 5 and all(stat.ok for stat in digest.llm_calls)
+    assert len(digest.llm_calls) == 7 and all(stat.ok for stat in digest.llm_calls)
     saved = analysis_config.paths.data_dir / "issues" / "te_2026.10.03" / "digest.json"
     assert load_json(saved, Digest).to_dict() == digest.to_dict()
     import json
@@ -88,13 +88,13 @@ def test_missing_ids_uses_client_repair(analysis_config: Config, example_issue: 
 
 
 def test_signal_warning(analysis_config: Config, tmp_path: Path) -> None:
-    digest = analyze_issue(issue([article("a1", paragraphs=["Taiwan " * 12])]), analysis_config,
+    digest = analyze_issue(issue([article("a1", paragraphs=["Taiwan " * 12, *BODY])]), analysis_config,
                            FakeLLMClient(answer), workdir=tmp_path / "analysis")
     assert any("提及 12 次" in warning and "等級為 0" in warning for warning in digest.warnings)
 
 
 def test_one_failed_classification_batch_falls_back(analysis_config: Config, tmp_path: Path) -> None:
-    source = issue([article(f"a{i}", paragraphs=["Taiwan is a synthetic location."]) for i in range(25)])
+    source = issue([article(f"a{i}", paragraphs=["Taiwan is a synthetic location.", *BODY]) for i in range(25)])
 
     def responder(prompt: str, model: str, stage: str) -> dict[str, Any] | LLMError:
         if stage == "classify" and '"id":"a0"' in prompt:
@@ -112,12 +112,12 @@ def test_one_failed_summary_unit_falls_back(analysis_config: Config, tmp_path: P
     source = issue([article(f"a{i}") for i in range(40)])
 
     def responder(prompt: str, model: str, stage: str) -> dict[str, Any] | LLMError:
-        if stage == "summarize_e" and '"article_id":"a0"' in prompt:
+        if stage == "summarize_e" and '"article_id":"a3"' in prompt:
             return LLMError("synthetic quota", kind="quota")
         return answer(prompt, model, stage)
 
     digest = analyze_issue(source, analysis_config, FakeLLMClient(responder), workdir=tmp_path / "analysis")
-    assert digest.summaries["a0"].headline_zh == "（摘要產生失敗）Synthetic a0"
+    assert digest.summaries["a3"].headline_zh == "（摘要產生失敗）Synthetic a3"
     assert digest.summaries["a39"].model == "fake"
     assert any("摘要失敗" in warning for warning in digest.warnings)
 
@@ -160,8 +160,8 @@ def test_cover_pair_and_quote_repair(analysis_config: Config, tmp_path: Path) ->
     digest = analyze_issue(source, analysis_config, fake, workdir=tmp_path / "analysis")
     assert digest.classifications["l1"].tier == "merged"
     assert digest.classifications["a1"].tier == "A"
-    assert digest.summaries["a1"].leader_stance.startswith("社論主張：")
-    assert len([call for call in fake.calls if call[2] == "summarize_a"]) == 2
+    assert digest.summaries["a1"].leader_stance.startswith("作者主張：")
+    assert len([call for call in fake.calls if call[2] == "summarize_a"]) == 3
 
 
 def test_cache_key_changes_with_models_text_and_history(analysis_config: Config, tmp_path: Path) -> None:

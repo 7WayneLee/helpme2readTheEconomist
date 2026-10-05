@@ -24,6 +24,8 @@ def test_defaults_and_frozen_tree(tmp_path: Path) -> None:
     assert config.source.branch == "master"
     assert config.llm.max_parallel == 2
     assert config.llm.models.classify == ("gemini-3.8-flash-high", "claude-sonnet-4-6")
+    assert config.llm.models.focus == ("gemini-3.8-flash-high", "claude-sonnet-4-6")
+    assert config.analysis.focus_count == 3
     assert config.english.min_words == 600
     assert config.english.level.startswith("全民英檢中級")
     assert config.telegram.message_delay_seconds == 1.1
@@ -82,6 +84,11 @@ force_tier_by_kind = {}
     ('[llm]\nbackend = "agy"', "llm.backend"),
     ('[llm.models]\nclassify = []', "llm.models.classify"),
     ('[llm.models]\nclassify = [42]', "llm.models.classify[0]"),
+    ('[llm.models]\nfocus = []', "llm.models.focus"),
+    ('[analysis]\nfocus_count = 0', "analysis.focus_count"),
+    ('[analysis]\nfocus_count = -1', "analysis.focus_count"),
+    ('[analysis]\nfocus_count = true', "analysis.focus_count"),
+    ('[analysis]\nfocus_count = "3"', "analysis.focus_count"),
     ('[paths]\ndata_dir = 3', "paths.data_dir"),
     ('[telegram]\nenabled = "true"', "telegram.enabled"),
     ('[telegram]\ncover_photo = "true"', "telegram.cover_photo"),
@@ -159,6 +166,7 @@ def test_example_matches_defaults(tmp_path: Path) -> None:
     configured = load_config(example)
     assert configured.llm == default.llm
     assert configured.tiers == default.tiers
+    assert configured.analysis == default.analysis
     assert configured.source == default.source
     assert configured.english == default.english
     assert configured.telegram == default.telegram
@@ -194,3 +202,11 @@ def test_relative_executable_paths_follow_config_directory(tmp_path: Path) -> No
     assert load_config(path).llm.gwg_bin == str(tmp_path / "tools/gwg")
     path.write_text('[llm]\ngwg_bin = "gwg-custom"', encoding="utf-8")
     assert load_config(path).llm.gwg_bin == "gwg-custom"
+
+
+def test_focus_configuration_overrides(tmp_path: Path) -> None:
+    path = tmp_path / "focus.toml"
+    path.write_text('[analysis]\nfocus_count = 2\n[llm.models]\nfocus = ["custom-focus"]')
+    config = load_config(path)
+    assert config.analysis.focus_count == 2
+    assert config.llm.models.focus == ("custom-focus",)

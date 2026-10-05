@@ -38,6 +38,7 @@ class SourceConfig:
 class ModelsConfig:
     classify: tuple[str, ...] = DEFAULT_MODELS
     pair: tuple[str, ...] = DEFAULT_MODELS
+    focus: tuple[str, ...] = DEFAULT_MODELS
     summarize_a: tuple[str, ...] = DEFAULT_MODELS
     summarize_b: tuple[str, ...] = DEFAULT_MODELS
     summarize_c: tuple[str, ...] = DEFAULT_MODELS
@@ -68,6 +69,11 @@ class TiersConfig:
     })
     min_tier_by_kind: dict[str, str] = field(default_factory=lambda: {"briefing": "C"})
     force_tier_by_kind: dict[str, str] = field(default_factory=lambda: {"letters": "E", "obituary": "E"})
+
+
+@dataclass(frozen=True)
+class AnalysisConfig:
+    focus_count: int = 3
 
 
 @dataclass(frozen=True)
@@ -114,6 +120,7 @@ class Config:
     source: SourceConfig = field(default_factory=SourceConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     tiers: TiersConfig = field(default_factory=TiersConfig)
+    analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
     english: EnglishConfig = field(default_factory=EnglishConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     telegraph: TelegraphConfig = field(default_factory=TelegraphConfig)
@@ -199,6 +206,8 @@ def _build(cls: type[T], data: dict[str, Any], prefix: str, base_dir: Path) -> T
 
 
 def _validate(config: Config) -> None:
+    if config.analysis.focus_count <= 0:
+        _fail("analysis.focus_count", "必須大於零")
     for name in ("cover_companion_min", "leader_companion_min"):
         if getattr(config.tiers, name) not in TIER_ORDER:
             _fail(f"tiers.{name}", "必須是 A、B、C、D 或 E")
@@ -298,6 +307,7 @@ def load_config(path: str | Path | None = None) -> Config:
     _validate(config)
     return Config(
         paths=config.paths, source=config.source, llm=config.llm, tiers=config.tiers,
+        analysis=config.analysis,
         english=config.english, telegram=config.telegram, telegraph=config.telegraph, report=config.report,
         secrets=_load_secrets(),
     )

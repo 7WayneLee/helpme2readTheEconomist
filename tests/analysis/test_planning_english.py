@@ -57,12 +57,12 @@ def test_plan_no_llm_and_filters(analysis_config: Config, example_issue: Issue, 
     monkeypatch.setattr(command, "make_llm_client", lambda _: pytest.fail("plan must not construct a client"))
     assert main(["analyze", "--issue", "2026.10.03", "--plan", "--only-tier", "E", "--limit", "2"]) == 0
     output = capsys.readouterr().out
-    assert "classify:" in output and "summarize_e: articles=2" in output and "brief:" in output
+    assert "classify:" in output and "focus:" in output and "summarize_e: articles=2" in output and "brief:" in output
     assert "prompt_bytes=" in output and "models=fake" in output and "最大提示詞" in output
     assert not (analysis_config.paths.data_dir / "issues" / "te_2026.10.03" / "digest.json").exists()
 
 
 def test_all_prompt_files_exist() -> None:
-    expected = {"_common.md", "classify.md", "pair.md", "brief.md", "english_pick.md", "english_guide.md",
+    expected = {"_common.md", "classify.md", "pair.md", "focus.md", "brief.md", "english_pick.md", "english_guide.md",
                 *(f"summarize_{tier}.md" for tier in "abcde")}
     assert {path.name for path in PROMPT_DIR.glob("*.md")} == expected

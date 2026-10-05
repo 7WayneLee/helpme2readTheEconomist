@@ -14,7 +14,7 @@ from ..models import LLMCallStat, save_json
 from ..zhtw import DEFAULT_SKIP_KEYS
 from .prompts import Unit
 
-SKIP_KEYS = DEFAULT_SKIP_KEYS | {"id", "question", "section", "kind", "title", "source_url", "issue_date"}
+SKIP_KEYS = DEFAULT_SKIP_KEYS | {"id", "focus_ids", "question", "section", "kind", "title", "source_url", "issue_date"}
 CACHE_FORMAT_VERSION = 2
 
 
@@ -41,9 +41,20 @@ def read_cache(workdir: Path, unit: Unit) -> UnitResult | None:
         if not isinstance(data, dict) or not isinstance(model, str) or model not in unit.models:
             return None
         unit.validate(data)
-        return UnitResult(unit, data, model)
+        fallback_error = envelope.get("fallback_error_kind")
+        if fallback_error is not None and (unit.stage != "focus" or not isinstance(fallback_error, str)):
+            return None
+        return UnitResult(unit, data, model, fallback_error)
     except (OSError, UnicodeError, ValueError, TypeError, KeyError):
         return None
+
+
+def cache_focus_fallback(workdir: Path, result: UnitResult, data: dict[str, Any]) -> None:
+    """Keep a recovered focus decision and its warning on a warm rerun."""
+    result.unit.validate(data)
+    save_json(cache_path(workdir, result.unit), {"format_version": CACHE_FORMAT_VERSION,
+                                              "key": result.unit.cache_key, "data": data,
+                                              "model": result.model, "fallback_error_kind": result.error_kind})
 
 
 class UnitRunner:
