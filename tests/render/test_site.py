@@ -2,8 +2,12 @@ from copy import deepcopy
 from dataclasses import replace
 from html.parser import HTMLParser
 import json
+import os
 from pathlib import Path
+import stat
 import subprocess
+import sys
+import textwrap
 
 import pytest
 
@@ -16,7 +20,7 @@ from econ_digest.render.html import article_html, brief_html
 from econ_digest.render.telegraph import render_telegraph, with_navigation
 from econ_digest.site import build_site
 from econ_digest.site.backup import backup_output
-from econ_digest.site.publish import publish_site
+from econ_digest.site.publish import PublishError, _preflight, _run_ssh, _upload_directory, publish_site
 from econ_digest.state import load_state
 
 
@@ -153,33 +157,254 @@ def test_telegraph_only_leading_cover_and_navigation_after_it(sample_digest):
         assert len(json.dumps(page.nodes, ensure_ascii=False, separators=(",", ":")).encode()) <= 10000
 
 
-def test_publish_rsync_scope_permissions_cover_reuse_and_failure(sample_digest, tmp_path, monkeypatch):
-    site = build_site(sample_digest, tmp_path / "output", images=IssueImages(cover=blobs()[0]))
+@pytest.fixture
+def fake_ssh(tmp_path, monkeypatch):
+    """Execute the remote shell locally, with real tar and no possible network."""
+    directory = tmp_path / "fake-bin"
+    directory.mkdir()
+    executable = directory / "ssh"
+    executable.write_text(f"#!{sys.executable}\n" + textwrap.dedent('''\
+        import json
+        import os
+        from pathlib import Path
+        import sys
+
+        args = sys.argv[1:]
+        with Path(os.environ["FAKE_SSH_CALLS"]).open("a") as calls:
+            calls.write(json.dumps(args) + "\\n")
+        while args[:1] == ["-o"]:
+            args = args[2:]
+        if len(args) != 2 or args[0] != "example-host":
+            sys.exit("fake ssh accepts only the test host and one remote command")
+        script = args[1]
+        failure = os.environ.get("FAKE_SSH_FAILURE")
+        if failure == "ssh":
+            for number in range(10):
+                print(f"synthetic ssh diagnostic {number}", file=sys.stderr)
+            sys.exit(1)
+        if failure == "missing-tar" and script == "command -v tar":
+            sys.exit("synthetic remote tar unavailable")
+        if failure == "timeout" and script != "command -v tar":
+            script = 'echo "synthetic transport timeout" >&2; exec sleep 2'
+        if failure == "extract":
+            script = 'tar() { command tar "$@"; echo "synthetic extraction failure" >&2; return 1; };\\n' + script
+        if failure == "permissions":
+            script = 'find() { echo "synthetic chmod failure" >&2; return 1; };\\n' + script
+        if failure == "install":
+            script = 'mv() { case "$3" in *.backup) ;; */.incoming/*) echo "synthetic install failure" >&2; return 1;; esac; command mv "$@"; };\\n' + script
+        if failure == "file-install":
+            script = 'mv() { case "$3" in *.tmp*) echo "synthetic file install failure" >&2; return 1;; esac; command mv "$@"; };\\n' + script
+        os.execv("/bin/sh", ["sh", "-c", script])
+        '''), encoding="utf-8")
+    executable.chmod(0o755)
+    calls = tmp_path / "ssh-calls.jsonl"
+    monkeypatch.setenv("FAKE_SSH_CALLS", str(calls))
+    monkeypatch.setenv("PATH", str(directory) + os.pathsep + os.environ["PATH"])
+    return calls
+
+
+def site_tree(directory):
+    return {str(path.relative_to(directory)): None if path.is_dir() else path.read_bytes()
+            for path in directory.rglob("*")}
+
+
+def assert_site_permissions(directory):
+    for path in (directory, *directory.rglob("*")):
+        assert stat.S_IMODE(path.stat().st_mode) == (0o755 if path.is_dir() else 0o644), path
+
+
+def test_publish_ssh_tar_end_to_end_scope_permissions_cover_reuse(sample_digest, tmp_path, illustrated_epub, fake_ssh):
+    site = build_site(sample_digest, tmp_path / "local output", illustrated_epub)
+    assert site.cover and (site.directory / "img").is_dir()
+    # Spaces, quotes and shell syntax in the path must remain literal.
+    remote = tmp_path / "remote 'quoted'; $(touch must-not-exist)"
+    config = SiteConfig(True, "https://site.example", "example-host", str(remote), 17)
     record = tmp_path / "data/site_publish.json"
-    config = SiteConfig(True, "https://site.example", "example-host", "/srv/example", 17)
-    calls = []
-    monkeypatch.setattr("econ_digest.site.publish.subprocess.run", lambda args, **kw: calls.append((args, kw)))
+    old_issue = remote / "2026-09-26"
+    old_issue.mkdir(parents=True)
+    (old_issue / "unrelated.html").write_text("keep older issue")
+    (remote / "keep.txt").write_text("keep unrelated root file")
+    for path in (site.directory, *site.directory.rglob("*")):
+        path.chmod(0o700 if path.is_dir() else 0o600)
     result = publish_site(site, config, record)
     assert result.index_url == "https://site.example/2026-10-03/index.html"
     name = json.loads(record.read_text())["cover_name"]
     assert result.cover_url == "https://site.example/covers/" + name
-    assert calls[0][0][:6] == ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=17", "example-host"]
-    for args, kw in calls[1:]:
-        assert args[0] == "rsync" and "-a" in args and "--chmod=D755,F644" in args
-        assert kw["stdin"] == subprocess.DEVNULL and kw["timeout"] == 17
-        if "--delete" in args:
-            assert args[-1] in ("example-host:/srv/example/2026-10-03/", "example-host:/srv/example/assets/")
-    assert calls[1][0][-2] == str(site.directory) + "/"
-    assert calls[-1][0][-1].endswith("/covers/" + name)
-    publish_site(site, config, record)
+    assert site_tree(remote / site.issue_date) == site_tree(site.directory)
+    assert (remote / site.issue_date / "TheEconomist.2026.10.03.epub").read_bytes() == illustrated_epub.read_bytes()
+    assert (remote / "covers" / name).read_bytes() == site.cover.data
+    assert (remote / "index.html").read_bytes() == (site.root / "index.html").read_bytes()
+    assert site_tree(remote / "assets") == site_tree(site.root / "assets")
+    assert_site_permissions(remote / site.issue_date)
+    assert_site_permissions(remote / "assets")
+    assert_site_permissions(remote / "covers")
+    assert list((remote / ".incoming").iterdir()) == []
+    calls = [json.loads(line) for line in fake_ssh.read_text().splitlines()]
+    assert len(calls) == 5 and calls[0][-1] == "command -v tar"
+    assert all(args[:5] == ["-o", "BatchMode=yes", "-o", "ConnectTimeout=17", "example-host"] for args in calls)
+    assert "tar -xf -" in calls[1][-1] and "tar -xf -" in calls[3][-1]
+    (remote / site.issue_date / "stale.html").write_text("stale page")
+    (remote / "assets/stale.css").write_text("stale stylesheet")
+    (site.pages["index"]).write_text("updated issue")
+    (site.root / "index.html").write_text("updated archive")
+    (site.root / "assets/site.css").write_text("updated css")
+    updated = replace(site, cover=ImageBlob("new.jpg", "image/jpeg", b"new synthetic cover"))
+    assert publish_site(updated, config, record).cover_url == result.cover_url
     assert json.loads(record.read_text())["cover_name"] == name
+    assert "published_at" in json.loads(record.read_text())
+    assert site_tree(remote / site.issue_date) == site_tree(site.directory)
+    assert site_tree(remote / "assets") == site_tree(site.root / "assets")
+    assert (remote / "index.html").read_text() == "updated archive"
+    assert (remote / "covers" / name).read_bytes() == updated.cover.data
+    assert list((remote / "covers").iterdir()) == [remote / "covers" / name]
+    assert (old_issue / "unrelated.html").read_text() == "keep older issue"
+    assert (remote / "keep.txt").read_text() == "keep unrelated root file"
+    assert list((remote / ".incoming").iterdir()) == []
+    assert not Path("must-not-exist").exists()
+    assert_site_permissions(remote / site.issue_date)
+    assert_site_permissions(remote / "assets")
+
+
+@pytest.mark.parametrize("failure,diagnostic", [("ssh", "synthetic ssh diagnostic 9"),
+                                              ("missing-tar", "synthetic remote tar unavailable"),
+                                              ("extract", "synthetic extraction failure"),
+                                              ("permissions", "synthetic chmod failure"),
+                                              ("install", "synthetic install failure"),
+                                              ("timeout", "synthetic transport timeout")])
+def test_publish_remote_failure_keeps_previous_tree_and_logs_stderr(sample_digest, tmp_path, monkeypatch, caplog,
+                                                                  fake_ssh, failure, diagnostic):
+    site = build_site(sample_digest, tmp_path / "output")
+    remote = tmp_path / "remote"
+    config = SiteConfig(True, "https://site.example", "example-host", str(remote), 1 if failure == "timeout" else 30)
+    record = tmp_path / "data/site_publish.json"
+    assert publish_site(site, config, record)
+    before = site_tree(remote)
+    (site.pages["index"]).write_text("must not replace the existing issue")
+    monkeypatch.setenv("FAKE_SSH_FAILURE", failure)
+    logs = []
+    assert publish_site(site, config, record, log=logs.append) is None
+    assert site_tree(remote) == before
+    assert list((remote / ".incoming").iterdir()) == []
+    assert "published_at" not in json.loads(record.read_text())
+    assert diagnostic in caplog.text and diagnostic in logs[-1]
+    assert "stderr tail:" in caplog.text and "改用單檔 HTML 報告" in caplog.text
+    if failure == "ssh":
+        assert "diagnostic 0" not in caplog.text and "diagnostic 5" in caplog.text
+
+
+def test_publish_error_contains_remote_stderr_and_preserves_old_assets(tmp_path, monkeypatch, fake_ssh):
+    directory = tmp_path / "local-assets"
+    directory.mkdir()
+    (directory / "site.css").write_text("new css")
+    remote = tmp_path / "remote"
+    (remote / "assets").mkdir(parents=True)
+    (remote / "assets/site.css").write_text("old css")
+    monkeypatch.setenv("FAKE_SSH_FAILURE", "install")
+    with pytest.raises(PublishError, match="synthetic install failure"):
+        _upload_directory(directory, str(remote), "assets", ["ssh", "example-host"], 10)
+    assert (remote / "assets/site.css").read_text() == "old css"
+    assert list((remote / ".incoming").iterdir()) == []
+
+
+def test_publish_local_tar_error_keeps_previous_copy_and_includes_local_stderr(tmp_path, fake_ssh):
+    remote = tmp_path / "remote"
+    (remote / "assets").mkdir(parents=True)
+    (remote / "assets/site.css").write_text("previous css")
+    with pytest.raises(PublishError, match="local tar stderr tail:") as caught:
+        _upload_directory(tmp_path / "missing-directory", str(remote), "assets", ["ssh", "example-host"], 10)
+    assert "missing-directory" in str(caught.value)
+    assert (remote / "assets/site.css").read_text() == "previous css"
+    assert list((remote / ".incoming").iterdir()) == []
+
+
+def test_publish_refuses_symlinked_staging_directory(tmp_path, fake_ssh):
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("keep outside contents")
+    (remote / ".incoming").symlink_to(outside, target_is_directory=True)
+    local = tmp_path / "local"
+    local.mkdir()
+    with pytest.raises(PublishError, match=".incoming must not be a symlink"):
+        _upload_directory(local, str(remote), "assets", ["ssh", "example-host"], 10)
+    assert list(outside.iterdir()) == [outside / "keep.txt"]
+    assert (outside / "keep.txt").read_text() == "keep outside contents"
+
+
+@pytest.mark.parametrize("name", ["index.html", "covers/" + "a" * 32 + ".jpg"])
+def test_publish_file_failure_preserves_old_file(tmp_path, monkeypatch, fake_ssh, name):
+    from econ_digest.site.publish import _file_script
+    remote = tmp_path / "remote"
+    target = remote / name
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"previous content")
+    monkeypatch.setenv("FAKE_SSH_FAILURE", "file-install")
+    with pytest.raises(PublishError, match="synthetic file install failure"):
+        _run_ssh(["ssh", "example-host"], _file_script(str(remote), name), 10, "Upload file", data=b"new content")
+    assert target.read_bytes() == b"previous content"
+    assert list(target.parent.iterdir()) == [target]
+
+
+@pytest.mark.parametrize("executable", ["ssh", "tar"])
+def test_publish_local_preflight_error(sample_digest, tmp_path, monkeypatch, caplog, fake_ssh, executable):
+    import shutil
+    original = shutil.which
+    monkeypatch.setattr("econ_digest.site.publish.shutil.which", lambda name: None if name == executable else original(name))
+    with pytest.raises(PublishError, match=f"Local {executable} executable not found on PATH"):
+        _preflight(["ssh", "example-host"], 10)
+    site = build_site(sample_digest, tmp_path / "output")
+    config = SiteConfig(True, "https://site.example", "example-host", str(tmp_path / "remote"))
+    assert publish_site(site, config, tmp_path / "record.json", log=lambda _: None) is None
+    assert f"Local {executable} executable not found on PATH" in caplog.text
+    assert not fake_ssh.exists() and not (tmp_path / "remote").exists()
+
+
+def test_publish_remote_preflight_error(monkeypatch, fake_ssh):
+    monkeypatch.setenv("FAKE_SSH_FAILURE", "missing-tar")
+    with pytest.raises(PublishError, match="Remote tar preflight.*tar is required.*stderr tail:") as caught:
+        _preflight(["ssh", "example-host"], 10)
+    assert "synthetic remote tar unavailable" in str(caught.value)
+
+
+def test_publish_timeout_includes_stderr_and_redacts_credentials(fake_ssh):
+    script = "echo 'timeout context' >&2; echo 'token=secret-value Authorization: Bearer other-secret' >&2; exec sleep 2"
+    with pytest.raises(PublishError, match="timed out after 1 seconds") as caught:
+        _run_ssh(["ssh", "example-host"], script, 1, "Synthetic upload")
+    detail = str(caught.value)
+    assert "timeout context" in detail and "[redacted]" in detail
+    assert "secret-value" not in detail and "other-secret" not in detail
+
+
+@pytest.mark.parametrize("remote", ["relative/path", "/", "////", "/srv/../outside", "/./"])
+def test_publish_rejects_unsafe_remote_directory(sample_digest, tmp_path, caplog, fake_ssh, remote):
+    site = build_site(sample_digest, tmp_path / "output")
+    config = SiteConfig(True, "https://site.example", "example-host", remote)
+    assert publish_site(site, config, tmp_path / "record.json", log=lambda _: None) is None
+    assert "site.remote_dir must be an absolute path" in caplog.text
+    assert not fake_ssh.exists()
+
+
+def test_publish_rejects_issue_path_traversal(sample_digest, tmp_path, caplog, fake_ssh):
+    site = replace(build_site(sample_digest, tmp_path / "output"), issue_date="../outside")
+    config = SiteConfig(True, "https://site.example", "example-host", str(tmp_path / "remote"))
+    assert publish_site(site, config, tmp_path / "record.json", log=lambda _: None) is None
+    assert "issue_date must use YYYY-MM-DD" in caplog.text
+    assert not fake_ssh.exists()
+
+
+def test_publish_disabled_and_dry_run_do_not_preflight_or_change_record(sample_digest, tmp_path, monkeypatch):
+    site = build_site(sample_digest, tmp_path / "output")
+    record = tmp_path / "record.json"
+    record.write_text('{"cover_name":"' + "a" * 32 + '.jpg"}')
     before = record.read_bytes()
-    publish_site(site, config, record, dry_run=True, log=lambda _: None)
-    assert record.read_bytes() == before and len(calls) == 10
-    def fail(*args, **kwargs):
-        raise subprocess.TimeoutExpired("ssh", 17)
-    monkeypatch.setattr("econ_digest.site.publish.subprocess.run", fail)
-    assert publish_site(site, config, record, log=lambda _: None) is None
+    monkeypatch.setattr("econ_digest.site.publish.shutil.which", lambda _: pytest.fail("must not preflight"))
+    monkeypatch.setattr("econ_digest.site.publish.subprocess.run", lambda *a, **kw: pytest.fail("must not invoke ssh"))
+    assert publish_site(site, SiteConfig(), record) is None
+    config = SiteConfig(True, "https://site.example", "example-host", str(tmp_path / "remote"))
+    logs = []
+    assert publish_site(site, config, record, dry_run=True, log=logs.append) is None
+    assert record.read_bytes() == before and logs
 
 
 def test_nested_backup_first_push_no_change_second_issue_and_failure(tmp_path, caplog):
