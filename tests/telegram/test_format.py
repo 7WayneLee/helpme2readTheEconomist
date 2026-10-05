@@ -112,8 +112,42 @@ def test_split_demo_long_chinese() -> None:
     assert len(text) == 9000
     chunks = split_html(blockquote(escape(text), expandable=True))
     assert len(chunks) == 3
+    assert [utf16_len(chunk) for chunk in chunks] == [4000, 4000, 1108]
     assert_chunks(chunks, 4000, text)
     assert all(chunk.startswith("<blockquote expandable>") for chunk in chunks)
+
+
+def test_split_header_keeps_blockquote_text_in_first_chunk() -> None:
+    header = bold("本週重點" * 50) + "\n\n"
+    text = "\n".join(["台灣晶片與人工智慧。" * 150] * 4)
+    chunks = split_html(header + blockquote(escape(text), expandable=True))
+    assert chunks[0].startswith(header + "<blockquote expandable>")
+    assert "台灣晶片與人工智慧。" in chunks[0]
+    assert utf16_len(chunks[0]) >= 4000 * 0.6
+    assert [utf16_len(chunk) for chunk in chunks] == [3247, 3037]
+    assert_chunks(chunks, 4000, strip_tags(header) + text)
+    assert chunks[1].startswith("<blockquote expandable>")
+
+
+def test_split_only_early_blank_line_still_fills_chunks() -> None:
+    text = "標題\n\n" + "台灣晶片與人工智慧" * 1000
+    chunks = split_html(text)
+    assert [utf16_len(chunk) for chunk in chunks] == [4000, 4000, 1004]
+    assert_chunks(chunks, 4000, text)
+
+
+def test_split_farthest_boundary_when_none_reaches_minimum_fill() -> None:
+    html = "台\n\n甲\n&#128204;"
+    chunks = split_html(html, 10)
+    assert chunks == ["台\n\n甲\n", "&#128204;"]
+    assert_chunks(chunks, 10, strip_tags(html))
+
+
+def test_split_boundary_at_exact_minimum_fill() -> None:
+    text = "甲乙丙丁\n\n" + "台灣" * 10
+    chunks = split_html(text, 10)
+    assert chunks[0] == "甲乙丙丁\n\n"
+    assert_chunks(chunks, 10, text)
 
 
 def test_split_nested_tags_reopens_attributes() -> None:
@@ -143,12 +177,17 @@ def test_split_entities_never_break() -> None:
 @pytest.mark.parametrize(
     "text,limit,expected",
     [
-        ("第一段\n\n第二段\n繼續內容很多", 12, "第一段\n\n"),
-        ("第一行\n第二句。繼續內容很多", 10, "第一行\n"),
-        ("台灣。後續分析很多字", 8, "台灣。"),
-        ("Done. Next words are lengthy", 15, "Done."),
-        ("What? More words here", 12, "What?"),
+        ("第一段\n\n第二段\n繼續內容很多", 12, "第一段\n\n第二段\n"),
+        ("第一行\n第二句。繼續內容很多", 10, "第一行\n第二句。"),
+        ("台灣。後續分析很多字", 8, "台灣。後續分析很"),
+        ("Done. Next words are lengthy", 15, "Done. Next word"),
+        ("What? More words here", 12, "What? More w"),
         ("abc.defghijk", 8, "abc.defg"),
+        ("第一段有內容\n\n第二段\n繼續內容很多", 12, "第一段有內容\n\n"),
+        ("第一行有足夠內容\n第二句。繼續內容很多", 14, "第一行有足夠內容\n"),
+        ("台灣晶片發展。後續分析很多字", 10, "台灣晶片發展。"),
+        ("This is done. Next words are lengthy", 20, "This is done."),
+        ("What's next? More words here", 18, "What's next?"),
     ],
 )
 def test_split_boundary_preference(text: str, limit: int, expected: str) -> None:

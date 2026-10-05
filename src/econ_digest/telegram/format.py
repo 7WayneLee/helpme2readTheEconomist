@@ -151,10 +151,11 @@ def _split_html(html: str, limit: int, continuation_html: str = "") -> list[str]
     while start < len(tokens):
         header = continuation_html if chunks else ""
         reopening = "".join(token.raw for token in open_stack)
-        size = utf16_len(header + reopening)
+        prefix_size = utf16_len(header + reopening)
+        size = prefix_size
         stack = open_stack.copy()
         closing_size = utf16_len(_closings(stack))
-        candidates: dict[int, tuple[int, list[_Token]]] = {}
+        candidates: dict[int, tuple[int, list[_Token], bool]] = {}
         previous = ""
         has_text = False
         reached_end = False
@@ -169,6 +170,9 @@ def _split_html(html: str, limit: int, continuation_html: str = "") -> list[str]
                 closing_size -= utf16_len(f"</{token.tag}>")
             if size + closing_size > limit:
                 break
+            # Prefer formatting boundaries only after using 60% of the space
+            # available after the continuation/reopening/closing overhead.
+            full_enough = 5 * (size - prefix_size) >= 3 * (limit - prefix_size - closing_size)
             if token.kind == "text":
                 has_text = True
                 current = visible[index]
@@ -182,17 +186,23 @@ def _split_html(html: str, limit: int, continuation_html: str = "") -> list[str]
                 ):
                     priority = 2
                 previous = current
-                candidates[priority] = (index + 1, stack.copy())
+                candidates[priority] = (index + 1, stack.copy(), full_enough)
             # Include closing tags following the last text without creating a
             # spurious empty chunk, and retain the latest hard boundary.
             if has_text or not stack:
-                candidates[3] = (index + 1, stack.copy())
+                candidates[3] = (index + 1, stack.copy(), full_enough)
             if index + 1 == len(tokens):
                 reached_end = True
         if reached_end:
             end, end_stack = len(tokens), []
         elif candidates:
-            end, end_stack = candidates[min(candidates)]
+            full_priorities = [priority for priority, (_, _, full) in candidates.items() if full]
+            chosen = (
+                candidates[min(full_priorities)]
+                if full_priorities
+                else max(candidates.values(), key=lambda candidate: candidate[0])
+            )
+            end, end_stack, _ = chosen
         else:
             raise ValueError("HTML wrapper or indivisible entity exceeds the message limit")
         chunk = header + reopening + "".join(token.raw for token in tokens[start:end])
