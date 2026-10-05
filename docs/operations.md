@@ -24,6 +24,7 @@
   - [8. Telegraph: FLOOD_WAIT_N](#8-telegraph-flood_wait_n)
   - [9. 缺少或無效的 Telegraph Access Token](#9-缺少或無效的-telegraph-access-token)
   - [10. Telegraph 頁面超出容量上限 (Page Size Limit)](#10-telegraph-頁面超出容量上限-page-size-limit)
+  - [11. Telegraph 頁面維護與模式限制 (send --pages-only)](#11-telegraph-頁面維護與模式限制-send---pages-only)
 
 ---
 
@@ -96,6 +97,25 @@ systemctl --user start econ-digest.service
 .venv/bin/econ-digest run
 ```
 
+#### Telegraph 模式每週傳送順序與機制
+在預設的 Telegraph 傳送模式下，執行 `send` 指令時，系統依序發送三階段內容至 Telegram 私人聊天室：
+1. **封面照片搭配摘要圖說（`send_photo`）**：
+   - 以當期《經濟學人》封面照片發送，圖說為核心摘要（包含期別標題概覽 overview、粗體「**與台灣相關**」焦點標題條列與 4 個 Instant View 分頁超連結）。
+   - **字數超限容錯**：若圖說超過 Telegram 的 1024 字元（UTF-16 單位）上限，系統會自動精簡圖說（暫時省略與台灣相關焦點）；若仍超過 1024 字元，封面圖說僅保留期別標題，並將完整摘要作為下一則獨立文字訊息發送。
+   - **無封面回退**：若電子書缺少封面照片或設定 `[telegram] cover_photo = false`，系統自動回退為發送純文字摘要訊息。
+   - **無國旗設計原則**：系統各國新聞均不使用國旗 emoji（其他國家要聞亦不加國旗），以文字標籤維持中立與排版整潔。
+2. **英文選文原文私密傳送**：
+   - 緊隨摘要之後，將英文選文全文以 Telegram 可展開／收合的引用區塊「**📖 英文選文原文（點開）**」（篇幅長時以「**📖 英文選文原文（續）**」接續分則）私密傳送。
+3. **完整圖文 HTML 報告檔案（`send_document`）**：
+   - 發送內嵌完整封面、文章插圖、圖表地圖與本週漫畫之獨立 HTML 報告（`report.html`，單檔約 7–8 MB），附帶圖說「**完整報告（含插圖與英文選文原文）**」（由 `[telegram] send_report_file` 控制，預設已恢復為 `true`；圖片內嵌由 `[report] embed_images` 控制，預設 `true`）。
+
+> [!IMPORTANT]
+> **Telegraph 頁面純文字與版權隱私防護原則**
+> Telegraph 頁面為公開網址，任何持有連結者皆可瀏覽存取。為保護著作權與個人閱讀隱私：
+> - **Telegraph 頁面一律維持純文字（Text-Only）**，絕不包含任何期刊圖片、封面照片、文章插圖、圖表或漫畫，亦絕對不放上《經濟學人》原始文章之英文全文。
+> - 插圖與英文原始全文**一律僅於 Telegram 私人聊天室（照片圖說、私訊摺疊區塊、文件附件）以及本機私密報告檔案流通**。
+> - Markdown 報告（`report.md`）亦維持純文字排版，不內嵌圖片。
+
 #### 接續中斷的傳送（斷點續傳）
 若在發布 Telegraph 頁面或推送至 Telegram 期間網路斷線或發生暫時性錯誤，直接再次執行 `send` 指令即可：
 ```sh
@@ -113,14 +133,30 @@ systemctl --user start econ-digest.service
 .venv/bin/econ-digest send --issue 2026.10.03 --force
 ```
 - **Telegraph 原地編輯（In-Place Edit）**：在預設的 Telegraph 模式下，`--force` 不會重複產生新的公開網址，而是讀取 `data/issues/te_<期別>/telegraph_pages.json`，對既有的 Telegraph 頁面進行**原地編輯（EDIT）**更新內容。網址維持完全相同，先前已推送至 Telegram 聊天室的 Instant View 預覽與連結均持續有效；若因調整摘要深度使分頁數量減少，多餘的舊頁面會自動被編輯為標題「此頁已不再使用」（並提供回當期第一頁之超連結）。
-- **Messages 模式行為**：若設定檔中為 `[telegram] delivery = "messages"`，則 `--force` 會自第一則起重新發送全部切分訊息。
+- **Messages 模式行為**：若設定檔中為 `[telegram] delivery = "messages"`，則 `--force` 會自第一則起重新發送全部切分訊息。在此模式下，文章標題冠上「T1 · …」等關聯層級代碼（例如 `<b>T1 · 文章標題</b>`），清晰識別重要程度；其他國家的新聞亦不使用國旗 emoji 標示。
 
 #### 離線預覽檢視（Dry-run）
 若欲在不對外建立 Telegraph 頁面且不向 Telegram 發送任何訊息的情況下，檢查頁面排版與大小，可加上 `--dry-run` 旗標：
 ```sh
 .venv/bin/econ-digest send --dry-run
 ```
-終端機會列印出所有分頁標題、以預覽網址計算的 UTF-8 JSON 位元組大小（驗證是否低於 `page_limit_bytes`），以及即將發送至 Telegram 的摘要訊息與英文選文私訊摺疊區塊。
+終端機會列印出所有分頁標題、以預覽網址計算的 UTF-8 JSON 位元組大小（驗證是否低於 `page_limit_bytes`），以及即將發送至 Telegram 的封面照片圖說、摘要訊息與英文選文私訊摺疊區塊。
+
+#### 僅原地更新 Telegraph 頁面（`send --pages-only`）
+若在修訂摘要提示詞、正體字對照表或修正報告文字後，需要更新已發布的 Telegraph 頁面，但**不想向 Telegram 私人聊天室再次發送任何訊息**（避免打擾手機端），可使用 `--pages-only` 旗標：
+```sh
+# 1. 離線預覽 Telegraph 各分頁標題與 UTF-8 位元組大小（不發布）
+.venv/bin/econ-digest send --pages-only --dry-run
+
+# 2. 原地更新 Telegraph 頁面
+.venv/bin/econ-digest send --pages-only
+
+# 或指定特定期別
+.venv/bin/econ-digest send --issue 2026.10.03 --pages-only
+```
+- **維持網址與進度不變**：程式會讀取 `data/issues/te_<期別>/telegraph_pages.json`，對既有的 Telegraph 頁面進行**原地編輯（EDIT）**，公開網址維持不變，已推送至 Telegram 的連結持續有效。
+- **不更動狀態**：不會向 Telegram 私人聊天室發送任何訊息，亦不會修改 `telegram_progress.json` 的傳送進度或 `state.json` 的已傳送紀錄。
+- **模式限制**：`--pages-only` 僅適用於 Telegraph 傳送模式（`[telegram] delivery = "telegraph"`）。若在 messages 模式下執行，程式會輸出 `--pages-only 僅適用於 Telegraph 模式；請將 telegram.delivery 設為 telegraph。` 並以結束代碼 2 退出。
 
 ---
 
@@ -162,10 +198,14 @@ rm -f data/issues/te_2026.10.03/digest.json
 .venv/bin/econ-digest render --issue 2026.10.03
 ```
 
-若欲將更新後的內容重新推送到 Telegram，可接續執行：
-```sh
-.venv/bin/econ-digest send --issue 2026.10.03 --force
-```
+- 若欲將更新後的內容重新推送到 Telegram 私人聊天室（包含重新發送封面照片、私密原文與完整報告檔案）：
+  ```sh
+  .venv/bin/econ-digest send --issue 2026.10.03 --force
+  ```
+- 若**僅欲原地更新 Telegraph 頁面而不向 Telegram 私人聊天室發送任何訊息**（保留進度與傳送狀態）：
+  ```sh
+  .venv/bin/econ-digest send --issue 2026.10.03 --pages-only
+  ```
 
 ---
 
@@ -181,6 +221,11 @@ rm -f data/issues/te_2026.10.03/digest.json
 | **Telegraph `FLOOD_WAIT_N`** | Telegraph API 觸發頻率限制（例如短時間內發送多個請求，回傳 `FLOOD_WAIT_7`）。 | 自動以正規表示式解析等待秒數，調用 `sleep` 暫停並自動重試（至多重試 5 次）。 | 系統自動退避重試，維運人員無須手動介入。 |
 | **缺少或無效的 Telegraph Token** | 密鑰檔未設定 `TELEGRAPH_ACCESS_TOKEN` 或該 Token 遭撤銷/無效。 | 在 `send` 時會嘗試自動呼叫 API 重新建立並寫入；若發生錯誤則中止。 | 執行 `.venv/bin/econ-digest telegraph-setup --force` 強制建立新帳號並更新密鑰。 |
 | **Telegraph 頁面超過容量上限** | 單篇內容加上導覽列超出 `page_limit_bytes` 上限（擲出 `ValueError`），或 API 回報內容超過 64 KB（64,000 位元組）。 | 發布前於本機檢驗節點大小，超限時立即中止，避免發布失敗或內容截斷。 | 在 `config.toml` 中調高 `[telegraph] page_limit_bytes`（上限為 64,000；預設 60,000），或調整該篇摘要深度。 |
+| **`--pages-only` 於 messages 模式失敗** | 設定檔為 `[telegram] delivery = "messages"` 時執行了 `send --pages-only`。 | 輸出 `--pages-only 僅適用於 Telegraph 模式；請將 telegram.delivery 設為 telegraph。` 並以結束代碼 2 退出。 | 確認 `[telegram] delivery = "telegraph"`；若在 messages 模式下需重新發送訊息，請使用 `--force`。 |
+| **封面圖說超出上限 (Caption > 1024)** | 摘要文字長度超過 Telegram 圖說上限（1024 個 UTF-16 單位）。 | 自動先精簡圖說（暫時省略與台灣相關焦點）；若仍超限，封面僅保留期別標題，並將完整摘要作為下一則獨立文字訊息發送。 | 系統全自動自我容錯降級，保證內容完整送達，維運人員無須干預。 |
+| **私人 HTML 報告體積較大（約 7–8 MB）** | HTML 報告預設以 Base64 Data URI 完整內嵌封面照片、文章題圖、圖表地圖、合併社論插圖（標註「社論插圖」）與本週漫畫。 | 內嵌於單一 HTML 檔案，離線可直接閱讀，Markdown 報告維持純文字。 | 若需關閉圖片內嵌，可設定 `[report] embed_images = false`；若不欲在 Telegram 附送報告檔案，可設定 `[telegram] send_report_file = false`。 |
+| **Telegraph 頁面維持純文字** | Telegraph 頁面為公開網址，基於版權與個人隱私保護，一律不放圖片與英文全文。 | 圖片與英文原文僅於 Telegram 私人聊天室與私人報告檔案流通。 | 正常保護機制，切勿手動將包含全文或插圖之頁面公開散播。 |
+| **新聞標籤無國旗設計** | 維持排版清晰與中立，各國新聞均不使用國旗 emoji。 | 摘要使用粗體「與台灣相關」與「•」清單，要聞使用文字標籤「【台灣相關】」，messages 模式使用「T1 · …」標記。 | 正常設計規範，全系統均不使用國旗 emoji。 |
 | **執行失敗 (Failed Run)** | 外部網路逾時、來源期別尚未釋出，或模型失敗率高於 30%。 | 每日每期至多發送一次 Telegram 失敗警報（避免洗版）；定時器於下個排程時段自動重試。 | 檢視 `data/logs/econ-digest.log` 查明失敗原因；排除外在問題後可隨時手動重新執行。 |
 | **執行鎖已被占用 (`AlreadyRunning`)** | 同一時間已有另一個 `econ-digest` 實例正在執行中。 | 取得非阻塞排他鎖（`fcntl.flock`）失敗時主動優雅退出（exit code 0），避免寫入衝突。 | 此為正常保護機制。若懷疑程序卡死，使用 `ps aux \| grep econ-digest` 確認，超時 3 小時系統會自動終止釋放。 |
 
@@ -385,4 +430,40 @@ rm -f data/issues/te_2026.10.03/digest.json
      ```sh
      .venv/bin/econ-digest analyze --issue <期別> --reanalyze
      .venv/bin/econ-digest send --issue <期別> --force
+     ```
+
+---
+
+### 11. Telegraph 頁面維護與模式限制 (`send --pages-only`)
+
+- **詳細成因與設計目的**：
+  在維運期間，若修改了提示詞、正體字對照表（`glossary.tsv`）或微調了報告文字，通常希望將更新後的內容同步至已發布的 Telegraph 導讀頁面，讓讀者點開 Telegram 既有的 Instant View 連結時能呈現最新修正。然而，此時維運人員**往往不希望**再次向 Telegram 私人聊天室發送整套訊息，避免打擾手機端讀者，亦不希望更動已記錄的傳送進度與狀態。
+- **系統內部行為**：
+  - `src/econ_digest/commands/send.py` 檢查當前傳送模式：
+    ```python
+    telegraph = config.telegram.delivery == "telegraph"
+    if pages_only and not telegraph:
+        log("--pages-only 僅適用於 Telegraph 模式；請將 telegram.delivery 設為 telegraph。")
+        return 2
+    ```
+    若在 `delivery = "messages"` 模式下使用 `--pages-only`，程式會輸出提示並以 exit code 2 拒絕執行。
+  - 在 Telegraph 模式下，系統會讀取 `data/issues/te_<期別>/telegraph_pages.json`，對既有的 Telegraph 頁面調用 `publish_pages()` 進行**原地編輯（EDIT）**更新內容。網址維持完全相同，不再使用的多餘頁面會標註「此頁已不再使用」。
+  - 處理完成後直接以 exit code 0 退出，**完全不觸碰** `telegram_progress.json` 的傳送進度，亦不修改 `state.json` 的已傳送紀錄（`delivered`），更不會發送任何 Telegram 聊天訊息。
+  - 支援與 `--dry-run` 結合使用（`send --pages-only --dry-run`），離線列印各分頁標題與 UTF-8 位元組大小，不發起任何對外連線。
+- **維運處置**：
+  1. **離線預覽分頁大小**：
+     ```sh
+     .venv/bin/econ-digest send --pages-only --dry-run
+     ```
+  2. **原地發布更新**：
+     ```sh
+     .venv/bin/econ-digest send --pages-only
+     ```
+     或指定期別：
+     ```sh
+     .venv/bin/econ-digest send --issue 2026.10.03 --pages-only
+     ```
+  3. 若欲重新推送整套內容至 Telegram 私人聊天室（包含重新發送封面照片、私訊與報告檔案），請改用：
+     ```sh
+     .venv/bin/econ-digest send --issue 2026.10.03 --force
      ```

@@ -1,6 +1,6 @@
 # econ-digest
 
-每週《經濟學人》（The Economist）新刊發行時，`econ-digest` 會自動從 GitHub 下載最新 EPUB 期別，透過本機大型語言模型（LLM）池進行全文解析與台灣讀者導向的深度分級摘要。**系統預設以 Telegraph 頁面搭配 Telegram 即時檢視（Instant View）傳送至您的 Telegram 私人聊天室**：每期抵達時僅有一則彙整整體脈絡、至多 3 則台灣焦點要聞與 4 個導讀分頁連結的摘要訊息，並於私訊中以摺疊區塊「📖 英文選文原文（點開）」隨附英文選文全文；同時保留逐則推播多則訊息的舊版模式，並可手動開啟隨附完整離線 HTML 報告，兼顧行動端極速閱讀與深度研讀需求。
+每週《經濟學人》（The Economist）新刊發行時，`econ-digest` 會自動從 GitHub 下載最新 EPUB 期別，透過本機大型語言模型（LLM）池進行全文解析與台灣讀者導向的深度分級摘要。**系統預設以 Telegraph 頁面搭配 Telegram 即時檢視（Instant View）傳送至您的 Telegram 私人聊天室**：每期抵達時依序以封面照片搭配摘要圖說（期別概覽、粗體「與台灣相關」焦點清單與 4 個 Instant View 導讀分頁連結）發送，並於私訊中以摺疊區塊「📖 英文選文原文（點開）」隨附英文選文全文，最後附上內嵌完整插圖之離線 HTML 報告文件（「完整報告（含插圖與英文選文原文）」）；同時保留逐則推播多則訊息的舊版模式，兼顧行動端極速閱讀、版權隱私與深度研讀需求。
 
 ---
 
@@ -47,21 +47,26 @@
 
 ### 預設傳送方式：Telegraph 即時檢視（Instant View）
 
-系統現在**預設採用 Telegraph 頁面並以 Telegram 即時檢視（Instant View）方式開啟**，提供乾淨、極速且無廣告干擾的閱讀體驗：
+系統現在**預設採用 Telegraph 頁面並以 Telegram 即時檢視（Instant View）方式開啟**，每週依序在您的私人聊天室發送三階段內容，提供乾淨、極速且無廣告干擾的閱讀體驗：
 
-1. **單則 Telegram 摘要訊息**：每期導讀送達時，您的聊天室只會收到**一則**摘要訊息。內容依序呈現：
+1. **封面照片搭配摘要圖說**：以當期《經濟學人》封面照片作為首則訊息發送，其圖說（Caption）即為導讀核心摘要，依序呈現：
    - 導讀期別標題與當期核心概覽（Overview）。
-   - 至多 3 則與台灣密切相關的要聞焦點標題（以 🇹🇼 標示）。
-   - 4 個主題分頁的閱讀超連結：
+   - 粗體「**與台灣相關**」標題與「•」清單列出至多 3 則台灣焦點標題。系統對各國新聞均不使用國旗 emoji（如其他國家要聞亦不加國旗），以文字標籤維持中立與清晰排版。
+   - 4 個主題分頁的 Instant View 閱讀超連結：
      - ① 本週導讀：要聞與台灣
      - ② 國際
      - ③ 財經・科技・文化
      - ④ 英文學習
    
    Telegram 會自動產生第一頁分頁之即時檢視（Instant View）預覽按鈕，點擊後即可在 Telegram App 內部原生展開閱讀，不用跳轉到外部瀏覽器。
-2. **英文選文原文私密傳送**：英文選文的英文原始段落**絕不公開**放在 Telegraph 頁面上，而是緊隨摘要訊息之後，透過 Telegram 私人聊天室以可展開／收合的引用區塊「**📖 英文選文原文（點開）**」（若篇幅較長則以「**📖 英文選文原文（續）**」接續分則）私密傳送，兼顧版權保護與對照研讀。
-3. **保留舊版多則訊息模式**：若您依然習慣在聊天室中直接閱讀長篇文字，可將設定檔指定為 `[telegram] delivery = "messages"`，即可切換回舊版逐則發送多則 Telegram 訊息的模式。
-4. **完整報告檔案附送調整**：`[telegram] send_report_file` 設定項之預設值調整為 `false`，預設不再附帶發送 `report.html` 檔案，以維持聊天視窗整潔；如有離線保存完整 HTML 報告檔案之需求，可於設定檔中將此項設為 `true`。
+   > [!NOTE]
+   > 若圖說文字超過 Telegram 的 1024 字元（UTF-16 單位）上限，系統會自動精簡圖說（暫時省略與台灣相關焦點）；若精簡後仍超過 1024 字元，則封面圖說僅保留期別標題，並將完整摘要作為下一則獨立文字訊息發送。若未提供封面照片或於設定中關閉封面（`[telegram] cover_photo = false`），則自動回退為純文字摘要訊息。
+
+2. **英文選文原文私密傳送**：英文選文的英文原始段落**絕不公開**放在 Telegraph 頁面上，而是緊隨封面摘要之後，透過 Telegram 私人聊天室以可展開／收合的引用區塊「**📖 英文選文原文（點開）**」（若篇幅較長則以「**📖 英文選文原文（續）**」接續分則）私密傳送，兼顧版權保護與對照研讀。
+
+3. **完整離線 HTML 報告文件**：發送內嵌完整封面、文章插圖、圖表地圖與本週漫畫之獨立 HTML 報告檔案（`report.html`），附帶圖說「**完整報告（含插圖與英文選文原文）**」（`[telegram] send_report_file` 設定項預設已恢復為 `true`）。
+
+4. **保留舊版多則訊息模式**：若您依然習慣在聊天室中直接閱讀長篇文字，可將設定檔指定為 `[telegram] delivery = "messages"`，即可切換回舊版逐則發送多則 Telegram 訊息的模式。在此模式下，文章標題開頭會標記關聯層級代碼（如 `<b>T1 · 文章標題</b>`、`<b>T2 · 文章標題</b>`、`<b>T3 · 文章標題</b>`），清晰區分台灣主軸與非台灣報導，各國新聞同樣不使用國旗 emoji。
 
 ---
 
@@ -73,7 +78,7 @@
 
 1. **① 本週導讀：要聞與台灣**（`weekly`）：
    - 整體脈絡綜述。
-   - 「本週要聞速覽」：收錄該期 "The world this week" 政治與商業要聞，涉及台灣之重要動態以 🇹🇼 標示並置頂。
+   - 「本週要聞速覽」：收錄該期 "The world this week" 政治與商業要聞，涉及台灣之重要動態以文字標籤「【台灣相關】」標示並置頂呈現（其他國家的新聞亦不使用國旗 emoji）。
    - 台灣主軸報導（台灣關聯層級 T1 至 T3）之深度解析、詳細摘要與「經濟學人社論立場」合併觀點。
 2. **② 國際**（`international`）：
    - 收錄非台灣主軸之各區域國際報導，依序涵蓋美國（`intl.us`）、中國含港澳（`intl.china`）、亞太（`intl.asia`）、歐洲含英與俄烏（`intl.europe`）及其他全球區域報導（`intl.other`）。
@@ -105,9 +110,10 @@
 > [!IMPORTANT]
 > **Telegraph 頁面公開性質與版權隱私防護須知**
 > 1. **公開連結性質與無法刪除**：Telegraph 是輕量級公開發布服務，任何持有該頁面 URL 者皆可公開瀏覽存取；且 Telegraph API **不支援刪除頁面（Delete Page）**，僅支援透過 Token 進行編輯修改（Edit Page）。
-> 2. **隨機不可臆測網址（Unguessable URLs）**：為守護個人閱讀隱私，程式在初次配置頁面時會以 16 個十六進位字元（64 位元隨機值，`secrets.token_hex(8)`）作為標題，由 Telegraph 伺服器指派具備隨機路徑之網址（例如 `https://telegra.ph/0123456789abcdef-10-05`），外部第三方無法循序猜測或批次爬取。
-> 3. **英文全文絕不放上公開頁面**：《經濟學人》原始文章之英文全文著作權屬於 The Economist Newspaper Limited。系統**絕對不會**將英文原始段落刊登於 Telegraph 公開頁面上；英文原文一律只透過 Telegram 私人聊天室以私密摺疊訊息傳送給您個人。
-> 4. **請勿公開分享連結**：本專案產出之 Telegraph 導讀頁面僅供個人學習與研讀之用，**請勿將頁面連結公開分享或散播**至公開社群、論壇或公開群組。
+> 2. **Telegraph 頁面維持純文字（無插圖、無英文全文）**：由於 Telegraph 頁面為公開網址，任何持有連結者皆可存取瀏覽，基於版權與個人隱私安全，**Telegraph 導讀頁面一律維持純文字（Text-Only）**，絕不包含任何期刊圖片、封面照片、文章插圖、圖表或漫畫，亦絕對不放上《經濟學人》原始文章之英文全文。
+> 3. **插圖與全文僅於私密管道流通**：期刊原始封面照片、內文題圖、圖表、地圖與本週漫畫，以及英文選文的英文原始段落，**僅透過 Telegram 私人聊天室（照片圖說、私訊摺疊區塊、報告文件）以及本機私密報告檔案（`report.html`）流通**，絕不對外公開。
+> 4. **隨機不可臆測網址（Unguessable URLs）**：為守護個人閱讀隱私，程式在初次配置頁面時會以 16 個十六進位字元（64 位元隨機值，`secrets.token_hex(8)`）作為標題，由 Telegraph 伺服器指派具備隨機路徑之網址（例如 `https://telegra.ph/0123456789abcdef-10-05`），外部第三方無法循序猜測或批次爬取。
+> 5. **請勿公開分享連結**：本專案產出之 Telegraph 導讀頁面僅供個人學習與研讀之用，**請勿將頁面連結公開分享或散播**至公開社群、論壇或公開群組。
 
 ---
 
@@ -161,7 +167,7 @@
 
 1. **本週要聞速覽（brief）**：
    - 取材自期刊前段之 "The world this week"（包含政治 `world_politics` 與商業 `world_business`）。
-   - 彙整為重點條列，若條目內容涉及台灣，會標記 🇹🇼 並置頂呈現。
+   - 彙整為重點條列，若條目內容涉及台灣，會加上文字標籤「【台灣相關】」並置頂呈現（其他國家的新聞亦不使用國旗 emoji 標示）。
 2. **社論合併（merged）**：
    - 社論（Leaders）在當期若有對應的專題報導，會將社論觀點合併至該專題報導中，呈現為「經濟學人社論立場」（包含 2–3 句核心社論主張），不單獨產出重疊的摘要篇幅。
 3. **略過不處理（skip）**：
@@ -212,7 +218,7 @@
    ↓
 [render] 生成 Markdown、HTML 報告、Telegraph 節點結構與 Telegram 訊息切塊
    ↓
-[send] 預設發布 Telegraph 即時檢視分頁並向 Telegram 推送單則摘要與英文原文私訊（或切換 messages 模式逐則傳送）
+[send] 預設依序推送封面照片摘要圖說、英文選文原文私訊與完整圖文 HTML 報告（或切換 messages 模式逐則傳送）
 ```
 
 ### 模組職責地圖
@@ -262,9 +268,19 @@
 ### 報告排版設計
 
 系統針對行動端快速閱讀與桌面端離線研讀提供雙軌排版最佳化：
-1. **Telegraph 即時檢視（預設）**：排版為 4 個主題分頁，支援手機 Telegram 原生 Instant View 極速開啟。頁面頂端提供粗體醒目的當前分頁與跨頁導覽列，頁尾提供前後頁按鈕；文章不跨頁腰斬，英文學習頁面答案置底，原文段落則以私訊摺疊區塊「📖 英文選文原文（點開）」安全傳送。
-2. **行動端 HTML 報告**：採用緊湊的膠囊標籤目錄（chip-style TOC）與卡片式堆疊單字表（stacked vocabulary cards），便於單手點選瀏覽與查閱。
-3. **舊版 Telegram 分段推播（`delivery = "messages"`）**：在長篇推播分段發送時，接續訊息開頭均會重複標註該章節標題並附帶「（續）」（例如 `<b>歐洲（續）</b>`），確保跨則閱讀時脈絡清晰不中斷。
+1. **Telegraph 即時檢視（預設）**：
+   - 排版為 4 個主題分頁，支援手機 Telegram 原生 Instant View 極速開啟。頁面頂端提供粗體醒目的當前分頁與跨頁導覽列，頁尾提供前後頁按鈕；文章不跨頁腰斬，英文學習頁面答案置底，原文段落則以私訊摺疊區塊「📖 英文選文原文（點開）」安全傳送。
+   - **純文字保護機制**：由於 Telegraph 頁面為公開網址，基於版權保護與隱私，Telegraph 導讀頁面一律維持純文字（Text-Only，無圖片、無英文全文）。
+2. **內嵌插圖之私人 HTML 報告（Illustrated HTML Report）**：
+   - **封面置頂**：報告最上方內嵌當期期刊封面照片（Cover image）。
+   - **文圖並茂**：每篇文章摘要正下方直接內嵌該報導之題圖（Head image）以及所有資訊圖表與地圖（Charts & Maps）。
+   - **合併社論標註**：合併社論專文之插圖會清楚標記為「社論插圖」（`<figcaption>社論插圖</figcaption>`）。
+   - **本週漫畫專區**：於「本週要聞速覽」區塊末端收錄「本週漫畫」（Political cartoon）專區。
+   - **單檔離線閱讀**：所有圖片以 Base64 Data URI 直接內嵌於 HTML 檔案中，完全不依賴外部連線；單期 HTML 報告檔案大小約 7–8 MB，並隨附於私人聊天室中供離線研讀與保存（預設由 `[telegram] send_report_file = true` 與 `[report] embed_images = true` 控制）。
+   - **Markdown 報告維持純文字**：相對地，產出之 Markdown 報告（`report.md`）則維持純文字排版，不內嵌任何圖片，維持輕量文字編輯與檢索。
+3. **舊版 Telegram 分段推播（`delivery = "messages"`）**：
+   - 在長篇推播分段發送時，接續訊息開頭均會重複標註該章節標題並附帶「（續）」（例如 `<b>歐洲（續）</b>`），確保跨則閱讀時脈絡清晰不中斷。
+   - 標題一律冠上台灣關聯層級代碼（例如 `<b>T1 · 文章標題</b>`、`<b>T2 · 文章標題</b>`、`<b>T3 · 文章標題</b>`），清晰識別重要程度；其他國家的新聞亦不使用國旗 emoji 標示。
 
 ---
 
@@ -361,7 +377,7 @@ econ-digest [-h] [--config PATH] [-v] <command> [options]
 | `signals` | `[--issue latest\|YYYY.MM.DD]` | 掃描文章並列出所有偵測到台灣相關關鍵詞之篇目與摘要片段。 |
 | `analyze` | `[--issue latest\|YYYY.MM.DD]`<br>`[--reanalyze]`<br>`[--plan]`<br>`[--only-tier {A,B,C,D,E}]`<br>`[--limit N]` | 執行文章分類、配對、深度分級與摘要產生。<br>• `--reanalyze`：清除本期分析快取後重新分析。<br>• `--plan`：僅列出分析批次規劃與提示詞大小，不呼叫模型。<br>• `--only-tier`：僅產出指定深度（A–E）之摘要。<br>• `--limit N`：最多產生 N 篇摘要。 |
 | `render` | `[--issue latest\|YYYY.MM.DD]` | 從既有的 `digest.json` 產出 Markdown、HTML 報告與 Telegram 訊息切塊。 |
-| `send` | `[--issue latest\|YYYY.MM.DD]`<br>`[--force]`<br>`[--dry-run]` | 依設定傳送導讀內容至 Telegram：<br>• **Telegraph 模式（預設）**：發布或原地更新 Telegraph 即時檢視分頁，並向 Telegram 傳送 1 則摘要訊息與英文選文原文私訊摺疊區塊。<br>• **Messages 模式**：依序逐則發送切分之 Telegram 多則 HTML 訊息。<br>• `--force`：重新傳送本期所有訊息。在 Telegraph 模式下，會**原地編輯（EDIT）**既有頁面（網址維持不變；不再使用的分頁標記為「此頁已不再使用」）；在 messages 模式下重新發送全部訊息。<br>• `--dry-run`：離線列印 Telegraph 頁面標題、位元組大小與待發送之訊息內容，不發布至 Telegraph 亦不向 Telegram 推送。 |
+| `send` | `[--issue latest\|YYYY.MM.DD]`<br>`[--force]`<br>`[--dry-run]`<br>`[--pages-only]` | 依設定傳送導讀內容至 Telegram：<br>• **Telegraph 模式（預設）**：依序發送封面照片與摘要圖說、英文選文原文私訊摺疊區塊，以及完整報告檔案（`report.html`）。<br>• **Messages 模式**：依序逐則發送切分之 Telegram 多則 HTML 訊息。<br>• `--force`：重新傳送本期所有訊息。在 Telegraph 模式下，會**原地編輯（EDIT）**既有頁面（網址維持不變；不再使用的分頁標記為「此頁已不再使用」）；在 messages 模式下重新發送全部訊息。<br>• `--dry-run`：離線列印 Telegraph 頁面標題、位元組大小與待發送之訊息內容，不發布至 Telegraph 亦不向 Telegram 推送。<br>• `--pages-only`：僅更新 Telegraph 頁面，保留聊天進度與傳送紀錄；不發送任何 Telegram 聊天訊息，亦不修改狀態；可搭配 `--dry-run` 離線預覽頁面大小；僅適用於 Telegraph 模式（若於 messages 模式下執行會報錯退出）。 |
 | `telegraph-setup` | `[--force]` | 建立 Telegraph 導讀頁面帳號，並將 `TELEGRAPH_ACCESS_TOKEN` 寫入密鑰檔（權限 600）。<br>• `--force`：建立新帳號並取代現有密鑰。 |
 | `telegram-setup` | `[--chat-id CHAT_ID]`<br>`[--test]`<br>`[--wait SECONDS]` | 偵測並綁定 Telegram 私人聊天室。<br>• `--chat-id`：直接指定聊天室 ID。<br>• `--test`：發送測試確認訊息。<br>• `--wait`：等候 `/start` 的秒數（預設 120 秒）。 |
 
@@ -391,7 +407,7 @@ econ-digest [-h] [--config PATH] [-v] <command> [options]
   ```sh
   .venv/bin/econ-digest send --dry-run
   ```
-  終端機會列印出所有分頁標題、以預覽網址計算的 UTF-8 JSON 位元組大小，以及即將送出的單則摘要訊息與英文選文原文私訊摺疊區塊。
+  終端機會列印出所有分頁標題、以預覽網址計算的 UTF-8 JSON 位元組大小，以及即將送出的封面照片圖說、摘要訊息與英文選文原文私訊摺疊區塊。
 
 #### 3. 提示詞調校與除錯（Prompt Tuning）
 在調整提示詞模板或設定時，可透過 `analyze` 旗標精準控制呼叫範圍，節省配額：
@@ -402,6 +418,18 @@ econ-digest [-h] [--config PATH] [-v] <command> [options]
 # 僅針對 Tier A（深度解析）產出一篇摘要以檢驗效果
 .venv/bin/econ-digest analyze --only-tier A --limit 1
 ```
+
+#### 4. 僅更新 Telegraph 頁面（`send --pages-only`）
+若在修訂摘要提示詞、正體字對照表或微調報告內容後，希望原地更新既有的 Telegraph 頁面，但**不想**在 Telegram 私人聊天室重複發送訊息干擾讀者，可使用 `--pages-only`：
+```sh
+# 離線預覽將更新的 Telegraph 各分頁大小（不發布）
+.venv/bin/econ-digest send --pages-only --dry-run
+
+# 原地更新 Telegraph 頁面（網址維持不變，不發送 Telegram 訊息，保留聊天進度與傳送紀錄）
+.venv/bin/econ-digest send --pages-only
+```
+> [!NOTE]
+> `--pages-only` 僅在 Telegraph 模式（`[telegram] delivery = "telegraph"`）下生效。若於 messages 模式下執行，程式會提示錯誤並退出。
 
 ---
 
@@ -444,8 +472,11 @@ cp config.example.toml config.toml
 - **`[telegram]`**：
   - `enabled`：是否啟用推播（預設 `true`）。
   - `delivery`：傳送模式，可設為 `"telegraph"`（預設，以 Telegraph 即時檢視傳送）或 `"messages"`（舊版逐則發送多則 Telegram 訊息）。
-  - `send_report_file`：是否將完整的 `report.html` 作為附件檔案發送（**新預設值為 `false`**，避免訊息過於冗長；需要時可手動設為 `true`）。
+  - `send_report_file`：是否將完整的 `report.html` 作為附件檔案發送（**預設值為 `true`**，附帶發送內嵌插圖與原文之完整報告檔案）。
+  - `cover_photo`：是否使用當期期刊封面照片發送摘要圖說（預設 `true`；若設為 `false` 或電子書缺少封面，則退回純文字摘要訊息）。
   - `message_delay_seconds`：訊息發送間隔秒數，防止觸發 Telegram 頻率限制（預設 `1.1`）。
+- **`[report]`**：
+  - `embed_images`：私人 HTML 報告是否內嵌封面照片、文章題圖、圖表地圖與漫畫插圖（預設 `true`；若設為 `false` 則產出不含圖片的純文字 HTML 報告）。
 - **`[telegraph]`**：
   - `author_name`：Telegraph 頁面作者名稱（預設 `"經濟學人導讀"`，上限 128 個字元）。
   - `author_url`：Telegraph 作者連結網址（選填，預設 `""`，上限 512 個字元）。
@@ -540,7 +571,7 @@ data/
 > [!IMPORTANT]
 > `data/issues/` 資料夾內包含《經濟學人》原始文章之完整英文內容與 EPUB 檔案，其著作權歸 The Economist Newspaper Limited 所有。
 > 1. 專案 `.gitignore` 預設已排除 `data/` 資料夾。請確保產出的報告與本機快取僅供個人離線學習研讀之用，切勿將包含全文之資料公開放置於公開網站、公用儲存庫或公開頻道。
-> 2. Telegraph 發布之頁面為公開網址且無法刪除，系統嚴格遵循版權保護原則，**絕不將英文原始文章段落放上 Telegraph 頁面**（英文全文僅以私訊摺疊區塊傳送給您個人），網址亦採隨機不可臆測設計。請勿將導讀連結對外散播或公開分享。
+> 2. Telegraph 發布之頁面為公開網址且無法刪除，系統嚴格遵循版權與隱私保護原則，**Telegraph 導讀頁面一律維持純文字（Text-Only，無圖片、無英文全文）**。期刊封面照片、文章插圖、圖表地圖、漫畫與英文原始文章段落，**一律僅透過 Telegram 私人聊天室（照片圖說、私訊摺疊區塊、檔案附件）以及本機私密 HTML 報告流通**，網址亦採隨機不可臆測設計。請勿將導讀連結對外散播或公開分享。
 
 ---
 
