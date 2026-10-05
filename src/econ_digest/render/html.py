@@ -7,8 +7,8 @@ from importlib.resources import files
 
 from ..models import Digest
 from ..taxonomy import TIERS
-from .common import (Entry, english_article, generation_time, merged_leader_titles,
-                     metadata, overview, sections, skipped, statistics, summary_fields, title,
+from .common import (TAIWAN_TAG, Entry, english_article, generation_time, merged_leader_titles,
+                     metadata, ordered_brief, overview, sections, skipped, statistics, summary_fields, title,
                      word_count_label)
 
 
@@ -83,7 +83,11 @@ def render_html(digest: Digest) -> str:
     body += '<nav aria-label="目錄"><h2>目錄</h2><div class="toc-chips">' + "".join(chips) + '</div></nav>'
     body += '<section id="brief"><h2>本週要聞速覽</h2>'
     for label, items in (("政治", digest.week_brief.politics if digest.week_brief else []), ("商業", digest.week_brief.business if digest.week_brief else [])):
-        body += f"<h3>{label}</h3>" + bullets([("🇹🇼 " if item.taiwan_related else "") + item.text_zh for item in items])
+        body += f"<h3>{label}</h3><ul>"
+        for item in ordered_brief(items):
+            badge = f'<span class="badge taiwan">{TAIWAN_TAG}</span> ' if item.taiwan_related else ""
+            body += f"<li>{badge}{escape(item.text_zh)}</li>"
+        body += "</ul>"
     body += '</section><section id="taiwan"><h2>台灣</h2>'
     for index, section in enumerate(groups):
         if index == 3:

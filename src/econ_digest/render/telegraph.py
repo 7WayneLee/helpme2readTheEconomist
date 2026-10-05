@@ -7,8 +7,8 @@ from dataclasses import dataclass, replace
 from ..models import Digest
 from ..telegraph.nodes import Node, content_size, node, validate_nodes
 from ..telegram.format import blockquote, bold, check_html, escape, link, split_html, utf16_len
-from .common import (Entry, english_article, entries, merged_leader_titles, metadata,
-                     overview, sections, summary_fields, title, word_count_label)
+from .common import (TAIWAN_TAG, Entry, english_article, entries, merged_leader_titles, metadata,
+                     ordered_brief, overview, sections, summary_fields, title, word_count_label)
 
 GROUPS = (("weekly", "本週導讀"), ("international", "國際"),
           ("topics", "財經・科技・文化"), ("english", "英文學習"))
@@ -98,8 +98,8 @@ def _logical_blocks(digest: Digest) -> list[list[_Block]]:
     weekly = [_Block((), [node("p", overview(digest)), node("h3", "本週要聞速覽")])]
     for label, items in (("政治", digest.week_brief.politics if digest.week_brief else []),
                          ("商業", digest.week_brief.business if digest.week_brief else [])):
-        ordered = sorted(items, key=lambda item: not item.taiwan_related)
-        weekly.append(_Block((label,), [node("ul", *[node("li", ("🇹🇼 " if item.taiwan_related else "") + item.text_zh) for item in ordered])]
+        ordered = ordered_brief(items)
+        weekly.append(_Block((label,), [node("ul", *[node("li", (TAIWAN_TAG if item.taiwan_related else "") + item.text_zh) for item in ordered])]
                              if ordered else [node("p", "本期沒有這類要聞。")]))
     groups = sections(digest)
     for section in groups[:3]:
@@ -190,7 +190,9 @@ def summary_message(digest: Digest, pages: list[Page], urls: dict[str, str]) -> 
     lines = ["📰 " + bold(title(digest)), escape(overview(digest))]
     taiwan = sorted((item for item in entries(digest) if item.classification.taiwan_level),
                     key=lambda item: (item.classification.taiwan_level, item.article.order))
-    lines.extend("🇹🇼 " + escape(item.classification.title_zh) for item in taiwan[:3])
+    if taiwan:
+        lines.append(bold("與台灣相關"))
+        lines.extend("• " + escape(item.classification.title_zh) for item in taiwan[:3])
     lines.append("")
     labels = ("本週導讀：要聞與台灣", "國際", "財經・科技・文化", "英文學習")
     lines.extend(NUMBERS[page.group] + " " + link(urls[page.key], labels[page.group]) for page in pages if page.part == 1)

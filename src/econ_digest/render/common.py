@@ -6,8 +6,14 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from ..models import Article, ArticleSummary, Classification, Digest
+from ..models import Article, ArticleSummary, BriefItem, Classification, Digest
 from ..taxonomy import CATEGORIES, CATEGORY_SHORT_LABELS, TAIWAN_LEVELS, TIER_ORDER
+
+TAIWAN_TAG = "【台灣相關】"
+
+
+def ordered_brief(items: list[BriefItem]) -> list[BriefItem]:
+    return sorted(items, key=lambda item: not item.taiwan_related)
 
 
 @dataclass(frozen=True)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..models import BriefItem, Digest
 from ..telegram.format import blockquote, bold, escape, italic, pack_blocks, split_html, utf16_len
-from .common import (Entry, english_article, merged_leader_titles, metadata, overview,
+from .common import (TAIWAN_TAG, Entry, english_article, merged_leader_titles, metadata, ordered_brief, overview,
                      sections, summary_fields, title, word_count_label)
 
 
@@ -13,7 +13,8 @@ def field(label: str, values: list[str]) -> str:
 
 
 def brief_list(items: list[BriefItem]) -> str:
-    return "\n".join(("🇹🇼 " if item.taiwan_related else "• ") + escape(item.text_zh) for item in items)
+    return "\n".join((TAIWAN_TAG if item.taiwan_related else "• ") + escape(item.text_zh)
+                     for item in ordered_brief(items))
 
 
 def overview_html(digest: Digest) -> str:
@@ -37,7 +38,7 @@ def overview_html(digest: Digest) -> str:
 
 def full_taiwan_html(digest: Digest, entry: Entry) -> str:
     level = entry.classification.taiwan_level
-    lines = [bold(f"🇹🇼 T{level} · {entry.classification.title_zh}"), italic(entry.article.title),
+    lines = [bold(f"T{level} · {entry.classification.title_zh}"), italic(entry.article.title),
              escape(metadata(entry)), field("一句話重點", [entry.summary.headline_zh]),
              field("與台灣的關聯", [entry.classification.taiwan_link or "未提供"])]
     body = [field(label, values) for label, values in summary_fields(entry.summary, headline=False)]
@@ -50,7 +51,7 @@ def full_taiwan_html(digest: Digest, entry: Entry) -> str:
 
 def compact_html(digest: Digest, entry: Entry, *, taiwan: bool = False) -> str:
     summary = entry.summary
-    label = f"{'🇹🇼 T3 · ' if taiwan else ''}{entry.classification.title_zh}"
+    label = f"{'T3 · ' if taiwan else ''}{entry.classification.title_zh}"
     if summary.tier == "E" and not taiwan:
         return bold(label) + " — " + escape(summary.headline_zh)
     lines = [bold(label), italic(entry.article.title), escape(metadata(entry)), escape(summary.headline_zh)]
@@ -105,12 +106,12 @@ def render_telegram(digest: Digest, limit: int = 4000) -> list[str]:
     result = split_html(overview_html(digest), limit)
     groups = sections(digest)
     if not any(section.entries for section in groups[:3]):
-        result.extend(split_html("🇹🇼 台灣：本期沒有台灣相關文章。", limit))
+        result.extend(split_html("台灣：本期沒有台灣相關文章。", limit))
     for section in groups[:2]:
         for entry in section.entries:
             result.extend(split_html(full_taiwan_html(digest, entry), limit))
     if groups[2].entries:
-        result.extend(section_messages([bold("🇹🇼 三、間接相關（T3）"), *[compact_html(digest, entry, taiwan=True) for entry in groups[2].entries]], "台灣 T3", limit))
+        result.extend(section_messages([bold("三、間接相關（T3）"), *[compact_html(digest, entry, taiwan=True) for entry in groups[2].entries]], "台灣 T3", limit))
     for section in groups[3:]:
         result.extend(section_messages([bold(section.title), *[compact_html(digest, entry) for entry in section.entries]], section.title, limit))
     result.extend(section_messages(english_blocks(digest), "英文學習選文", limit))

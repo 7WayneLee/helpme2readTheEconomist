@@ -10,6 +10,7 @@ from urllib.request import OpenerDirector, Request
 import pytest
 
 from econ_digest.commands import send, telegraph_setup
+from econ_digest.cli import build_parser
 from econ_digest.config import Config, SecretsConfig
 from econ_digest.fetch import issue_directory
 from econ_digest.models import Digest, save_json
@@ -206,3 +207,105 @@ def test_dry_run_without_secrets_no_network_or_progress(prepared_telegraph: tupl
     assert not opener.calls
     assert not (directory / "telegraph_pages.json").exists()
     assert not (directory / "telegram_progress.json").exists()
+
+
+@pytest.mark.parametrize("delivered,force", [(False, False), (True, False), (True, True)])
+def test_pages_only_edits_in_place_preserves_state_and_chat_progress(
+        prepared_telegraph: tuple, delivery_digest: Digest, monkeypatch: pytest.MonkeyPatch,
+        delivered: bool, force: bool) -> None:
+    config, directory, opener = prepared_telegraph
+    if delivered:
+        assert send.send_digest(config) == 0
+    else:
+        opener.fail_message = 2
+        with pytest.raises(TelegramError):
+            send.send_digest(config)
+        opener.fail_message = None
+    # Preserve even unrelated run/history fields exactly as stored.
+    state = load_state(config.paths.data_dir)
+    state["last_run"]["outcome"] = "synthetic-existing-run"
+    save_state(config.paths.data_dir, state)
+    state_path = config.paths.data_dir / "state.json"
+    state_before = state_path.read_bytes()
+    progress_path = directory / "telegram_progress.json"
+    progress_before = progress_path.read_bytes()
+    pages_path = directory / "telegraph_pages.json"
+    pages_before = pages_path.read_bytes()
+    paths = [record["path"] for record in json.loads(pages_before)]
+
+    delivery_digest.summaries[delivery_digest.issue.articles[0].id].summary_zh = "更正後的頁面摘要"
+    save_json(directory / "digest.json", delivery_digest)
+    (directory / "report.html").unlink()
+    config = replace(config, secrets=SecretsConfig(telegraph_access_token=TOKEN),
+                     telegram=replace(config.telegram, send_report_file=True))
+    opener.calls.clear()
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        pytest.fail("僅更新頁面時不得建立 Telegram 客戶端或產生聊天訊息")
+
+    monkeypatch.setattr(send, "TelegramClient", forbidden)
+    monkeypatch.setattr(send, "summary_message", forbidden)
+    monkeypatch.setattr(send, "original_text_messages", forbidden)
+    args = build_parser().parse_args(["send", "--issue", delivery_digest.issue_date, "--pages-only",
+                                      *(["--force"] if force else [])])
+    assert send.run(args, config) == 0
+    assert [method for method, _ in opener.calls] == ["editPage/" + path for path in paths]
+    assert "更正後的頁面摘要" in opener.calls[2][1]["content"]
+    assert state_path.read_bytes() == state_before
+    assert progress_path.read_bytes() == progress_before
+    assert pages_path.read_bytes() == pages_before
+
+
+def test_pages_only_creates_only_missing_pages_without_state_or_progress(prepared_telegraph: tuple) -> None:
+    config, directory, opener = prepared_telegraph
+    pages_path = directory / "telegraph_pages.json"
+    known = [{"key": "weekly:1", "path": "synthetic-stored-path", "url": "https://telegra.ph/synthetic-stored-path"}]
+    save_json(pages_path, known)
+    config = replace(config, secrets=SecretsConfig(telegraph_access_token=TOKEN))
+    assert send.send_digest(config, pages_only=True) == 0
+    assert opener.creates == 3 and opener.edits == 4
+    assert not opener.messages and not opener.documents
+    assert all(method in ("createPage",) or method.startswith("editPage/") for method, _ in opener.calls)
+    assert json.loads(pages_path.read_text())[0] == known[0]
+    assert not (directory / "telegram_progress.json").exists()
+    assert not (config.paths.data_dir / "state.json").exists()
+    opener.calls.clear()
+    assert send.send_digest(config, pages_only=True) == 0
+    assert opener.creates == 3 and opener.edits == 8
+    assert all(method.startswith("editPage/") for method, _ in opener.calls)
+
+
+@pytest.mark.parametrize("existing_pages", [False, True])
+def test_pages_only_dry_run_lists_only_page_titles_and_sizes(
+        prepared_telegraph: tuple, capsys: pytest.CaptureFixture[str], existing_pages: bool) -> None:
+    config, directory, opener = prepared_telegraph
+    if existing_pages:
+        assert send.send_digest(config) == 0
+    snapshot = {path: path.read_bytes() for path in directory.glob("*.json")}
+    state_path = config.paths.data_dir / "state.json"
+    state_before = state_path.read_bytes() if state_path.exists() else None
+    opener.calls.clear()
+    capsys.readouterr()
+    args = build_parser().parse_args(["send", "--issue", "2026.10.03", "--pages-only", "--dry-run"])
+    assert send.run(args, replace(config, secrets=SecretsConfig())) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert len(lines) == 4
+    assert all(line.startswith("經濟學人導讀 2026/10/03｜") and line.endswith(" 位元組") for line in lines)
+    assert not opener.calls
+    assert {path: path.read_bytes() for path in directory.glob("*.json")} == snapshot
+    assert (state_path.read_bytes() if state_path.exists() else None) == state_before
+
+
+def test_pages_only_retry_reuses_allocated_paths_after_failure(prepared_telegraph: tuple) -> None:
+    config, directory, opener = prepared_telegraph
+    opener.fail_edit = 2
+    with pytest.raises(TelegraphError):
+        send.send_digest(config, pages_only=True)
+    records = (directory / "telegraph_pages.json").read_bytes()
+    assert opener.creates == 4 and not opener.messages and not opener.documents
+    opener.fail_edit = None
+    assert send.send_digest(config, pages_only=True) == 0
+    assert opener.creates == 4 and opener.edits == 6
+    assert (directory / "telegraph_pages.json").read_bytes() == records
+    assert not (directory / "telegram_progress.json").exists()
+    assert not (config.paths.data_dir / "state.json").exists()

@@ -5,8 +5,8 @@ from __future__ import annotations
 from html import escape
 
 from ..models import Digest
-from .common import (Entry, english_article, generation_time, merged_leader_titles,
-                     metadata, overview, sections, skipped, statistics, summary_fields, title,
+from .common import (TAIWAN_TAG, Entry, english_article, generation_time, merged_leader_titles,
+                     metadata, ordered_brief, overview, sections, skipped, statistics, summary_fields, title,
                      word_count_label)
 
 
@@ -69,7 +69,8 @@ def render_markdown(digest: Digest) -> str:
              *[f"- [{label}](#{anchor})" for anchor, label in toc], "", '<a id="brief"></a>', "## 本週要聞速覽", ""]
     for label, items in (("政治", digest.week_brief.politics if digest.week_brief else []),
                          ("商業", digest.week_brief.business if digest.week_brief else [])):
-        lines.extend([f"### {label}", "", *[f"- {'🇹🇼 ' if item.taiwan_related else ''}{text(item.text_zh)}" for item in items], ""])
+        lines.extend([f"### {label}", "", *[f"- {TAIWAN_TAG if item.taiwan_related else ''}{text(item.text_zh)}"
+                                            for item in ordered_brief(items)], ""])
     lines.extend(['<a id="taiwan"></a>', "## 台灣", ""])
     for section in groups:
         lines.extend([f'<a id="{section.anchor}"></a>', f"{'###' if section.anchor.startswith('taiwan-') else '##'} {section.title}", ""])

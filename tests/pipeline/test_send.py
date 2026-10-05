@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from econ_digest.commands import render, send
+from econ_digest.cli import build_parser
 from econ_digest.config import Config, SecretsConfig, TelegramConfig
 from econ_digest.fetch import issue_directory
 from econ_digest.models import Digest, save_json
@@ -166,3 +167,13 @@ def test_missing_secret_before_any_report_exists(delivery_config: Config) -> Non
 
 def test_render_missing_digest_returns_one(delivery_config: Config) -> None:
     assert render.run(argparse.Namespace(issue="latest"), delivery_config) == 1
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_pages_only_rejected_in_messages_mode(delivery_config: Config, dry_run: bool,
+                                            capsys: pytest.CaptureFixture[str]) -> None:
+    args = build_parser().parse_args(["send", "--pages-only", *(["--dry-run"] if dry_run else [])])
+    assert send.run(args, replace(delivery_config, secrets=SecretsConfig())) == 2
+    output = capsys.readouterr().out
+    assert "--pages-only 僅適用於 Telegraph 模式" in output
+    assert "telegram.delivery" in output

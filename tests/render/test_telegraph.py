@@ -28,7 +28,7 @@ def test_four_pages_order_and_complete_fields(sample_digest: Digest) -> None:
                  "重要引述", "中譯：", "對台灣的意涵", "延伸思考", "📰 經濟學人社論立場"):
         assert text in first
     assert first.index("台灣相關政治要聞") < first.index("非台灣政治要聞")
-    assert "🇹🇼" in first
+    assert "【台灣相關】" in first
     international = all_text(pages[1].nodes)
     assert [international.index(label) for label in ("美國", "中國", "亞太", "歐洲", "其他地區")] == sorted(
         international.index(label) for label in ("美國", "中國", "亞太", "歐洲", "其他地區"))
@@ -121,8 +121,9 @@ def test_summary_only_four_primary_links_and_taiwan_priority(sample_digest: Dige
     check_html(summary)
     assert "📰 <b>經濟學人導讀" in summary
     assert "台灣 T1 1 篇、T2 1 篇、T3 1 篇" in summary
-    assert summary.count("🇹🇼") == 3 and summary.count("<a ") == 4
-    assert summary.index("🇹🇼 台灣晶片展望") < summary.index("🇹🇼 台灣與國際合作") < summary.index("🇹🇼 供應鏈間接影響")
+    assert summary.count("• ") == 3 and summary.count("<a ") == 4
+    assert "<b>與台灣相關</b>\n• 台灣晶片展望" in summary
+    assert summary.index("• 台灣晶片展望") < summary.index("• 台灣與國際合作") < summary.index("• 供應鏈間接影響")
     assert "①" in summary and "④" in summary and "本週導讀：要聞與台灣" in summary
 
 

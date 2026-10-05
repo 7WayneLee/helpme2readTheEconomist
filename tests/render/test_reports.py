@@ -100,7 +100,7 @@ def test_telegram_order_limits_and_quiz_answers(sample_digest: Digest) -> None:
     all_text = "\n".join(messages)
     assert messages[0].startswith("📰 <b>經濟學人導讀")
     assert messages[0].index("台灣相關政治要聞") < messages[0].index("非台灣政治要聞")
-    expected = ["🇹🇼 T1", "🇹🇼 T2", "三、間接相關", "<b>美國</b>", "<b>中國</b>", "<b>亞太</b>", "<b>歐洲</b>",
+    expected = ["<b>T1 ·", "<b>T2 ·", "三、間接相關", "<b>美國</b>", "<b>中國</b>", "<b>亞太</b>", "<b>歐洲</b>",
                 "<b>其他地區</b>", "<b>財經商業</b>", "<b>科技</b>", "<b>科學</b>", "<b>文化生活</b>"]
     positions = [all_text.index(value) for value in expected]
     assert positions == sorted(positions)
