@@ -1,6 +1,6 @@
 # econ-digest
 
-每週《經濟學人》（The Economist）新刊發行時，`econ-digest` 會自動從 GitHub 下載最新 EPUB 期別，透過本機大型語言模型（LLM）池進行全文解析與台灣讀者導向的深度分級摘要。**系統預設以 Telegraph 即時檢視（Instant View）搭配私人圖文網站傳送至您的 Telegram 私人聊天室**：每期抵達時以**單則 Telegram 訊息**發送核心導讀（包含期別概覽、粗體「與台灣相關」焦點清單、無數字編號之 Instant View 各主題分頁連結，以及導向私人多頁網站的「🔒 圖文完整版（需帳密）」連結）。每一個 Telegraph 頁面均以該期封面圖為首圖（圖說標註「本期封面：…」），使 Instant View 與聊天室大圖預覽（Large media）均能完整呈現封面。同時提供可選用的舊版行為與逐則訊息推播模式，兼顧行動端極速閱讀、版權隱私與深度研讀需求。
+每週《經濟學人》（The Economist）新刊發行時，`econ-digest` 會自動從 GitHub 下載最新 EPUB 期別，透過本機大型語言模型（LLM）池進行全文解析與台灣讀者導向的深度分級摘要。**系統預設以 Telegraph 即時檢視（Instant View）搭配私人圖文網站傳送至您的 Telegram 私人聊天室**：每期抵達時以**單則 Telegram 訊息**發送核心導讀（包含刊期標題、標頭摘要列「〈本期封面故事標題〉｜共 N 篇文章」、無數字編號之 Instant View 各主題分頁連結，以及導向私人多頁網站的「🔒 圖文完整版（需帳密）」連結）。每一個 Telegraph 頁面均以該期封面圖為首圖（圖說標註「本期封面：…」），使 Instant View 與聊天室大圖預覽（Large media）均能完整呈現封面。同時提供可選用的舊版行為與逐則訊息推播模式，兼顧行動端極速閱讀、版權隱私與深度研讀需求。
 
 ---
 
@@ -19,12 +19,14 @@
   - [隱私與版權安全說明](#隱私與版權安全說明)
 - [私人網站與封存系統（`output/`）](#私人網站與封存系統output)
   - [`output/` 目錄結構](#output-目錄結構)
+  - [雙層導覽架構（Two-Level Navigation）](#雙層導覽架構two-level-navigation)
   - [私人網站發布（Private Site Publishing）](#私人網站發布private-site-publishing)
   - [發布失敗備援機制（Fallback）](#發布失敗備援機制fallback)
   - [私有 GitHub 儲存庫備份（Backup）](#私有-github-儲存庫備份backup)
 - [Telegram 頻道推播（Channel）](#telegram-頻道推播channel)
+- [新聞編輯與寫作風格（House Style）](#新聞編輯與寫作風格house-style)
 - [分類與摘要深度](#分類與摘要深度)
-  - [台灣關聯層級（Taiwan Levels）](#台灣關聯層級taiwan-levels)
+  - [台灣關聯層級（Taiwan Levels）與外部查證約束](#台灣關聯層級taiwan-levels與外部查證約束)
   - [本週焦點機制](#本週焦點機制)
   - [章節與分類排序](#章節與分類排序)
   - [摘要深度等級表（Tiers）](#摘要深度等級表tiers)
@@ -33,6 +35,9 @@
 - [系統架構](#系統架構)
   - [處理管線流程](#處理管線流程)
   - [模組職責地圖](#模組職責地圖)
+  - [模型路由與管線階段（Model Routing & Pipeline Stages）](#模型路由與管線階段model-routing--pipeline-stages)
+  - [中央社證據檢索機制（CNA Research）](#中央社證據檢索機制cna-research)
+  - [台灣事實清單維護（Fact Sheet Maintenance）](#台灣事實清單維護fact-sheet-maintenance)
   - [本機 gwg 模型池與在地化](#本機-gwg-模型池與在地化)
 - [安裝](#安裝)
 - [Telegram、Telegraph 與頻道設定](#telegramtelegraph-與頻道設定)
@@ -59,11 +64,11 @@
 
 系統預設採用 Telegraph 即時檢視（Instant View）搭配私人網站發布，每週向您的 Telegram 私人聊天室發送**單則訊息（ONE message）**，帶來乾淨俐落、極速且無廣告干擾的閱讀體驗：
 
-1. **單則 Telegram 核心摘要訊息**：
-   - **期別標題與整體概覽**：刊出期別與核心統計概覽（包含總篇數、台灣相關篇數與英文選文）。
-   - **「與台灣相關」焦點清單**：以粗體「**與台灣相關**」標籤與「•」清單列出至多 3 則關鍵台灣報導標題。系統對各國新聞均不使用國旗 emoji（其他國家要聞亦不加國旗），以文字標籤維持中立與清晰排版。
+1. **單則 Telegram 核心導讀訊息**：
+   - **刊期標題與標頭摘要列**：刊期標題（`📰 經濟學人導讀｜YYYY 年 M 月 D 日號`）與標頭列（`〈本期封面故事標題〉｜共 N 篇文章`）。不再發送「與台灣相關」獨立條列區塊，維持極致俐落與專業的中立排版。
    - **各主題分頁 Instant View 超連結（無數字編號）**：
      - 本週導讀
+     - 台灣
      - 本週焦點
      - 國際
      - 財經・科技・文化
@@ -73,6 +78,8 @@
 2. **大圖預覽與封面首圖**：
    - 每一個 Telegraph 頁面開頭均以當期期刊封面照片作為首圖（Figure，圖說標註「本期封面：…」）。
    - Telegram 收到訊息時會辨識第一頁 Telegraph 連結，並採用大圖卡（Large media）預覽，直接在聊天室展示精美封面照片；點擊 Instant View 亦能立即以原生介面展開閱讀。
+3. **事實檔更新提醒（私訊專屬）**：
+   - 每週若透過查證機制發現潛在事實異動，系統會另行於私人聊天室發送單則「⚠️ 台灣事實檔可能需要更新：…（請確認）」警報訊息（附中央社連結），頻道絕不推送此訊息，亦不干擾主導讀訊息。
 
 ### 選用舊式行為與逐則推播模式
 
@@ -91,16 +98,18 @@
 當使用預設的 Telegraph 傳送模式時，系統依據內容邏輯規劃分頁，**不使用任何數字序號**（如 ①、② 等），且僅產生實際有內容的分頁：
 
 1. **本週導讀**（`weekly`）：
-   - 整體脈絡綜述。
+   - 標頭概覽（`〈本期封面故事標題〉｜共 N 篇文章`）。
    - 「本週要聞速覽」：收錄該期 "The world this week" 政治與商業要聞，台灣相關要聞以「【台灣相關】」標記並置頂呈現。
-   - 台灣專區報導（台灣關聯層級 T1 至 T3）之深度解析與詳細摘要。
-2. **本週焦點**（`focus`）：
+2. **台灣**（`taiwan`）：
+   - 獨立成頁！收錄台灣專區報導（台灣關聯層級 T1 至 T3）之深度解析與詳細摘要。
+   - 台灣陳述與意涵下方均標註客觀查證出處（如「依據：中央社 YYYY/MM/DD〈標題〉」超連結）。
+3. **本週焦點**（`focus`）：
    - 獨立成頁之國際核心專題深度解析（詳見下方說明）。
-3. **國際**（`international`）：
+4. **國際**（`international`）：
    - 收錄非台灣主軸、非焦點之各區域報導：美國（`intl.us`）、中國含港澳（`intl.china`）、亞太（`intl.asia`）、歐洲含英與俄烏（`intl.europe`）及其他全球區域報導（`intl.other`）。
-4. **財經・科技・文化**（`topics`）：
+5. **財經・科技・文化**（`topics`）：
    - 收錄財經商業（`finance`）、科技（`tech`）、科學（`science`）與文化生活（`culture`，含訃聞與讀者投書）專文與摘述。
-5. **英文學習**（`english`）：
+6. **英文學習**（`english`）：
    - 精選長文研讀指南（詞彙庫、片語、長難句精析、修辭亮點與測驗）。
 
 ### 本週焦點（Focus Articles）
@@ -112,10 +121,11 @@
 ### 章節與排版規則
 
 - **空章節完全省略**：當期若無特定分類之報導（例如該期無科學文章），該章節與對應分頁會完全隱藏，不留空白標題。
-- **無章節數字序號**：分頁標籤與章節標題一律為純文字（「本週導讀」、「本週焦點」、「國際」等），不冠上序號。
+- **無章節數字序號**：分頁標籤與章節標題一律為純文字（「本週導讀」、「台灣」、「本週焦點」、「國際」等），不冠上序號。
 - **專業用詞規範**：內文一律使用「**經濟學人立場**」與「**作者主張**」，絕不使用「社論」字眼。
 - **無附錄**：報告不設冗長的附錄章節。
 - **簡短條目無收合開關**：一句話簡短摘要（Tier E 等單句條目）直接展示內容，不加入多餘的「閱讀摘要」收合開關（disclosure toggle）。
+- **具體查證出處標註**：台灣專區與涉台報導之關聯陳述或意涵下方，一律附上至多 3 筆「依據：中央社 YYYY/MM/DD〈標題〉」外部來源超連結（此標註行見於私人網站、HTML 報告、Markdown 報告與 Telegraph 頁面，Telegram 聊天室訊息則省略以維持版面簡潔）。
 
 ### 圖片配置規範（Telegraph 公開頁面 vs 私人網站）
 
@@ -176,6 +186,14 @@ output/
     └── img/                    # 本期提取之高解析度插圖與圖表
         └── [hash].jpg
 ```
+
+### 雙層導覽架構（Two-Level Navigation）
+
+私人多頁網站具備專為行動端與桌面端設計的現代化雙層導覽體系：
+1. **頂部麵包屑導覽（Breadcrumb）**：各分頁頂部呈現「[所有期別](../index.html) › 本期期別（如 2026/10/03 號）」，標示網站階層並便於隨時返回歷史封存首頁或本期首頁。
+2. **置頂黏性章節分頁籤（Sticky Section Tabs）**：置頂橫向分頁導覽列（包含「要聞」、「台灣」、「焦點」、「國際」、「財經科技文化」、「英文」），隨頁面滾動固定於頂部，當前所在頁面高亮標示（`aria-current="page"`），便於單手滑動切換。
+3. **頁尾章節切換連結（Previous / Next Links）**：各章節底部提供「‹ 前一章節」與「後一章節 ›」切換按鈕，方便讀者順暢依序通讀全刊導讀。
+4. **具體查證出處標註**：在台灣專區與相關文章之「與台灣的關聯」或「對台灣的意涵」段落下方，精準附上至多 3 筆「依據：中央社 YYYY/MM/DD〈標題〉」外部查證連結。
 
 ### 私人網站發布（Private Site Publishing）
 
@@ -261,21 +279,58 @@ author_email = "you@example.com"
    ```
    （*機器人必須先加入該頻道，並被提升為管理員且具備「張貼訊息」（can_post_messages）權限。*）
 2. **頻道推播內容規範**：
-   - 頻道接收與私人聊天室相同的核心摘要（期別概覽、台灣相關焦點清單、各分頁 Instant View 超連結與大圖封面預覽）。
+   - 頻道接收與私人聊天室相同的核心導讀（刊期標題、標頭摘要列「〈本期封面故事標題〉｜共 N 篇文章」、各分頁 Instant View 超連結與大圖封面預覽）。
    - **完全不發送私人網站連結**：頻道訊息中**絕對不包含**「🔒 圖文完整版」連結。
+   - **完全不發送事實清單更新提醒**：台灣事實檔更新提醒（`fact_alerts`）為私訊專屬，絕不推送至頻道。
    - **不發送文件與原文**：頻道絕對不發送任何附件檔案或摺疊原文，維護頻道簡潔與隱私安全。
+
+---
+
+## 新聞編輯與寫作風格（House Style）
+
+為使導讀貼近台灣資深讀者閱讀習慣，系統之標題重寫與中文摘要全面遵循 `src/econ_digest/prompts/_style.md` 之新聞編輯規範。該指引深入借鑑中央通訊社（CNA）國際編譯標準與《報導者》（The Reporter）解釋性深度報導架構，徹底根除英文直譯腔（Translationese），完整研究與語料分析請參閱 [docs/research/writing-style.md](docs/research/writing-style.md)。
+
+### 1. 標題語法規範（嚴格遵循）
+
+- **長度規範**：目標字數為 **12–24 個繁體中文字**。
+- **雙子句全形空格分隔**：至多兩個子句，子句間**一律以全形空格「　」**分隔（禁止使用逗號「，」、斜線「/」或分號）。
+- **禁用問號「？」**：一律以主動、肯定或評估判斷句陳述核心事實與動向，絕不使用「…嗎？」等反問句。
+- **冒號「：」嚴格限於發言主體與引述**：僅用於引出特定發言者、機構或來源（如「經濟學人：…」、「民調：…」、「印度財長：…」），嚴禁用冒號代替破折號或同位語。
+- **強力主動動詞**：多用精準單雙音節動詞（如控、批、擬、恐、創、遭、獲、拚、揭、陷、飆、釀、襲、示警、反攻、重挫等）。
+- **阿拉伯數字與術語**：數字、百分比、日期統一採**阿拉伯數字**（如 2026年、51%、3.2億美元）；標題簡化為「**AI**」而不寫「人工智慧」（內文首次提及可寫全稱）。
+
+### 2. 忠於原文與真實性（最高核心原則）
+
+- **嚴禁增添原文未提及之內容**：摘要與標題必須**嚴格忠於原文**，絕對不得自行添加原文未載明的事實、推論、立場標籤、戲劇性衝突或情緒化字眼。
+- **精簡原則（捨細節而非造框架）**：在字數限制下壓縮時，應刪減次要細節，絕不可憑空捏造敘事框架。
+- **立場與評論標記**：遇評論文章若需點明立場，使用「經濟學人：…」、「經濟學人專欄：…」或「經濟學人立場：…」；**絕對禁用「社論」二字**。
+
+### 3. 翻譯腔黑名單與自然置換
+
+系統全面禁止生硬英式直譯，於提示詞與後處理中嚴格執行替換：
+- 剔除「進行訪問/打擊」（改為訪問、空襲）、「作出決定/反應」（改為拍板、反擊）、「對…進行」。
+- 剔除「隨著…的…」（改為因、鑑於、在…之際）、「基於」、「該國/該機構」（改為這個國家、此機構、相關部會）。
+- 剔除模糊套話「存隱憂」（改為恐難成局、藏變數、現隱患）、「面臨消長」（改為態勢逆轉、首度超越、差距拉大）。
+- 剔除劣質俗語「力抗/大秀」（改為抵禦、展現）、「開創新局」（改為開啟新頁、迎來轉機）、「接熱線」（改為通話、接聽危機專線）。
 
 ---
 
 ## 分類與摘要深度
 
-### 台灣關聯層級（Taiwan Levels）
+### 台灣關聯層級（Taiwan Levels）與外部查證約束
 
-| 層級代號 | 層級名稱 | 判定定義 | 預設摘要深度 |
+為確保台灣專區報導具備實質意義與客觀依據，系統實施嚴格的關聯認定與查證防護機制：
+
+| 層級代號 | 層級名稱 | 判定定義（門檻嚴格化） | 預設摘要深度 |
 | :--- | :--- | :--- | :--- |
 | **T1** | 台灣本身 | 台灣是報導的主要主題。 | **Tier A**（深度解析） |
-| **T2** | 台灣與國際 | 台灣是國際事件的主要參與者之一，例如台美關係、兩岸、半導體供應鏈等。 | **Tier B**（詳細摘要） |
-| **T3** | 間接相關 | 報導實質提及台灣，或議題對台灣有重大牽連。 | **Tier C**（重點摘要） |
+| **T2** | 台灣與國際 | 台灣是國際事件的主要參與者之一，例如台美關係、兩岸、半導體供應鏈關鍵環節。 | **Tier B**（詳細摘要） |
+| **T3** | 間接相關 | 報導必須**實質提及台灣**（substantive mention）或具備**具體影響機制**（concrete mechanism）；若僅為廣義、泛論的地緣政治或區域安全論述，**一律判定為 T0（一般國際報導，不列入台灣專區）**。 | **Tier C**（重點摘要） |
+
+#### 台灣查證（Grounding）防護守則
+1. **「對台灣的意涵」選填化**：「對台灣的意涵」為選填項目（Optional），僅在具備充分事實基礎或中央社查證證據時才撰寫；若無實質依據則完全留空，絕不牽強附會或臆測。
+2. **層級約束（單向收緊原則）**：外部證據可用於確認事實與具體影響，但**只能維持或調降層級**（例如將缺乏具體機制的候選文章由 T3 調降為 T0 回歸一般章節），**絕不能僅憑外部證據將原本非台灣主題的文章升級為 T1 或 T2**（避免外部事件喧賓奪主扭曲為台灣主導）。缺乏實質關聯陳述的文章，其台灣層級強制歸零（T0）。
+3. **查證出處標註行**：在私人網站、HTML 報告、Markdown 報告與 Telegraph 頁面中，台灣關聯陳述與意涵下方均附上至多 3 筆「依據：中央社 YYYY/MM/DD〈標題〉」超連結（Telegram 聊天室訊息不加來源行，保持簡潔）。
 
 ### 本週焦點機制
 
@@ -328,7 +383,7 @@ author_email = "you@example.com"
    ↓
 [parse] 解析結構與段落
    ↓
-[classify] 透過 LLM 識別台灣關聯層級（T1–T3）與領域分類
+[classify] 透過 LLM 識別台灣關聯層級（嚴格判定 T1–T3；泛地緣政治為 T0）與領域分類
    ↓
 [pair] 將 Leaders（經濟學人立場）與各章節專文進行關聯配對
    ↓
@@ -336,13 +391,19 @@ author_email = "you@example.com"
    ↓
 [summaries / brief / English] 平行呼叫 LLM 產出各級摘要、要聞速覽與英文研讀指南
    ↓
+[edit] 標題、一句話重點與要聞新聞專業編修（每批至多 20 項 / 15 KB，逐欄位驗證退回原文字）
+   ↓
+[ground_queries + ground] 產生搜尋詞並檢索中央社證據，執行客觀台灣關聯查證（約束層級與意涵）
+   ↓
+[facts] 每週定期檢查台灣事實清單（taiwan.md）時效性，發送私密更新提醒
+   ↓
 [zh-TW normalisation] 僅針對含非 Big5 字元之 CJK 片段以 OpenCC 轉繁，套用 glossary.tsv
    ↓
-[render & site build] 產生 Markdown、HTML 報告、Telegraph 頁面節點與 output/ 多頁網站
+[render & site build] 產生 Markdown、HTML 報告、Telegraph 頁面（獨立台灣頁）與 output/ 多頁網站（雙層導覽）
    ↓
 [site publish & backup] 透過 SSH rsync 發布私人網站，並將 output/ 備份至私有 GitHub 儲存庫
    ↓
-[send] 推送 Telegram 單則核心摘要訊息（含 Instant View 連結與私人網站連結）與頻道推播
+[send] 推送 Telegram 單則核心導讀訊息（Instant View 連結與私人網站連結）與頻道推播
 ```
 
 ### 模組職責地圖
@@ -351,12 +412,79 @@ author_email = "you@example.com"
 | :--- | :--- |
 | `src/econ_digest/cli.py` | 命令列介面入口與參數解析。 |
 | `src/econ_digest/config.py` | TOML 設定檔載入、驗證與密鑰管理。 |
-| `src/econ_digest/site/` | 多頁網站建置（`build.py`）、SSH rsync 發布（`publish.py`）與 Git 私有備份（`backup.py`）。 |
+| `src/econ_digest/site/` | 多頁網站建置（`build.py`，雙層導覽）、SSH rsync 發布（`publish.py`）與 Git 私有備份（`backup.py`）。 |
+| `src/econ_digest/analysis/editor.py` | 標題、一句話重點與要聞編修，支援批次切分與逐欄位安全驗證退回機制。 |
+| `src/econ_digest/analysis/grounding.py` | 台灣關聯查證（`ground_queries`、`ground`）與事實清單每週時效檢查（`facts`）。 |
 | `src/econ_digest/analysis/focus.py` | 評選本週 3 篇關鍵國際焦點專文並升級為 Tier A。 |
-| `src/econ_digest/render/` | Markdown、HTML 報告、Telegraph 頁面與 Telegram 訊息切塊。 |
+| `src/econ_digest/research/cna.py` | 檢索中央社（CNA）新聞客觀證據、精確 URL 日期解析、禮貌頻寬限制與短摘錄快取。 |
+| `src/econ_digest/facts/` | 具體日期與出處之台灣核心現況事實清單（`taiwan.md`）與載入器（`__init__.py`）。 |
+| `src/econ_digest/render/` | Markdown、HTML 報告、Telegraph 頁面節點與 Telegram 訊息切塊。 |
 | `src/econ_digest/images.py` | 自 EPUB 提取封面、題圖、內文圖表、漫畫與要聞配圖。 |
 | `src/econ_digest/commands/send.py` | Telegram 與 Telegraph 發送協調、斷點續傳與 `--pages-only` 整合。 |
 | `src/econ_digest/commands/telegram_setup.py` | 私人聊天室與頻道設定。 |
+
+### 模型路由與管線階段（Model Routing & Pipeline Stages）
+
+系統採用混合模型路由（Hybrid Model Routing）架構，在產出品質與執行效率間取得最佳平衡：
+
+| 階段 (Stage) | 主要模型 (Primary) | 備援模型 (Fallback) | 逾時時間 | 批次規格與職責說明 |
+| :--- | :--- | :--- | :---: | :--- |
+| `classify` | Gemini 3.8 Flash | Claude Sonnet 4.6 | 300 秒 | 初步識別台灣關聯與各文篇領域分類。 |
+| `pair` | Gemini 3.8 Flash | Claude Sonnet 4.6 | 300 秒 | 將封面與各章節專文與其對應的經濟學人立場配對。 |
+| `focus` | Gemini 3.8 Flash | Claude Sonnet 4.6 | 300 秒 | 評選當期除台灣外最關鍵的 3 篇專案報導升為 Tier A。 |
+| `summarize_a` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 300 秒 | 台灣 T1 報導與 3 篇本週焦點專文之高規格深度解析。 |
+| `summarize_b`~`e` | Gemini 3.8 Flash | Claude Sonnet 4.6 | 300 秒 | B 級詳細摘要、C 級重點摘要、D 級簡要摘要與 E 級單句摘要。 |
+| `brief` | Gemini 3.8 Flash | Claude Sonnet 4.6 | 300 秒 | "The world this week" 政治與商業要聞重點整理。 |
+| `english` | Gemini 3.8 Flash | Claude Sonnet 4.6 | 300 秒 | 候選文章評選（`english_pick`）與學習指南生成（`english_guide`）。 |
+| `edit` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 600 秒 | 標題、一句話重點與要聞之台灣新聞風格編修（每批至多 20 項 / 15 KB）。 |
+| `ground_queries` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 600 秒 | 針對涉台候選報導提出 1–3 組中央社繁體中文搜尋詞。 |
+| `ground` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 600 秒 | 結合中央社客觀證據查證台灣關聯與具體意涵（每批至多 3 篇 / 90 KB）。 |
+| `facts` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 300 秒 | 比對中央社最新要聞與台灣事實清單（`taiwan.md`）新鮮度。 |
+
+#### 路由與執行特性
+1. **模型分工與備援機制**：
+   - **Claude Opus 4.6 (thinking)**：主理最高思維深度任務（Tier A 深度解析、中文新聞編修 `edit`、關聯查證 `ground` 與事實更新檢查 `facts`）。若呼叫失敗自動降級至 Gemini 3.8 Flash。
+   - **Gemini 3.8 Flash**：主理高吞吐常規任務（初步分類、焦點評選、常規摘要、要聞速覽與英文選文）。若呼叫失敗自動切換至 Claude Sonnet 4.6。
+2. **階段逾時配置（`stage_timeout_seconds`）**：
+   因應 Opus 4.6 深度思考與批次文字校準運算，`edit` 與 `ground` 階段預設逾時設定為 **600 秒**；其餘階段維持全域 `call_timeout_seconds = 300` 秒。
+3. **每週預期執行時間（Expected Runtime）**：
+   相較於全 Flash 輕量管線，引入 Opus 4.6 (thinking) 與外部中央社檢索後，每週分析耗時有所增加。依據品質校準實測紀錄（[docs/research/quality-calibration-2026.10.03.md](docs/research/quality-calibration-2026.10.03.md)），光是 `edit`、`ground` 與 `facts` 階段回報之模型傳輸時間即約達 **15–25 分鐘**（單次實測傳輸為 928 秒至 1,500+ 秒），整期管線執行耗時約落在 **20–35 分鐘**數量級。維運時請確保定時器與系統服務逾時上限充足。
+
+### 中央社證據檢索機制（CNA Research）
+
+系統透過 `src/econ_digest/research/cna.py` 與中央通訊社（CNA）進行客觀事實檢索，嚴格遵守以下防護機制：
+- **網址路徑日期精確解析**：中央社新聞發布日期一律自新聞 URL 路徑直接解析（`/news/[a-z]+/(\d{8})\d+\.aspx$`，提取 `YYYYMMDD`），**絕不依賴搜尋引擎摘要呈現之可能錯誤日期**。
+- **禮貌頻率限制（Polite Rate Limit）**：對中央社發起的 HTTP 請求間隔至少保持 **1.0 秒**，避免對外部伺服器產生高頻負擔。
+- **短摘錄本機快取**：檢索結果僅提取新聞標題與前兩段（至多 200 字）作為純文字客觀證據，快取於 `data/research/`（由 `.gitignore` 排除，最多保留最近 500 筆，自動輪替淘汰），絕不於儲存庫或日誌中留存完整新聞文章。
+- **連線失敗優雅備援**：若中央社網路逾時或連線中斷，系統自動記錄警告（`中央社暫時無法連線；台灣關聯改以原文、事實檔與已取得的證據查證。`），流程持續進行，不會中斷崩潰。
+
+### 台灣事實清單維護（Fact Sheet Maintenance）
+
+- **事實清單定位**：由 `src/econ_digest/facts/taiwan.md` 統籌管理台灣核心政經與國防現況，包含 9 大核心領域：
+  1. 邦交國概況（截至統計，維持 12 友邦）
+  2. 府會與國安首長
+  3. 立法院第 11 屆席次與政黨分布
+  4. 國防預算與占 GDP 比例
+  5. 對外貿易結構與出口市場反轉（美超越中港成最大出口市場）
+  6. 台積電（TSMC）海外晶圓廠進度（美、日、德）
+  7. 台美關係與安全合作（軍售常態化與法案）
+  8. 台海現狀與共軍大規模演習歷史脈絡（環台軍演與灰色地帶常態化）
+  9. 關鍵戰略定位補充（先進製程產能與無核電轉型）
+- **具體日期與溯源規範**：事實清單中每一項數據與事件，**必須具備明確的「截至日期」與具體中央社（CNA）或官方新聞稿 URL**，嚴禁無依據之條目。
+- **每週自動新鮮度檢查**：每週管線之 `facts` 階段會自中央社抓取最新要聞比對事實清單，若偵測到潛在異動，會於私人聊天室發送私密訊息：
+  ```
+  ⚠️ 台灣事實檔可能需要更新：
+  • 邦交國概況 → 友邦動態異動（中央社）
+  （請確認）
+  ```
+  （此警報訊息僅發送至私人聊天室，頻道與公開頁面絕不呈現）。
+- **維護與更新工作流**：
+  維運人員收到通知後，點擊連結確認中央社報導屬實，即可手動編輯更新 `src/econ_digest/facts/taiwan.md`，並提交推送：
+  ```sh
+  git add src/econ_digest/facts/taiwan.md
+  git commit -m "docs(facts): update Taiwan diplomatic and defense status"
+  git push origin master
+  ```
 
 ---
 
@@ -490,18 +618,22 @@ gwg_bin = "gwg"
 max_parallel = 2
 call_timeout_seconds = 300
 no_account_wait_seconds = 900
+stage_timeout_seconds = { edit = 600, ground = 600 }
 
 [llm.models]
 classify = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
 pair = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
 focus = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
-summarize_a = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
+summarize_a = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"]
 summarize_b = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
 summarize_c = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
 summarize_d = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
 summarize_e = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
 brief = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
 english = ["gemini-3.8-flash-high", "claude-sonnet-4-6"]
+edit = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"]
+ground = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"]
+facts = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"]
 
 [tiers]
 cover_companion_min = "B"
