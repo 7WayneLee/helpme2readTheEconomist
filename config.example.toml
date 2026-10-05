@@ -45,8 +45,12 @@ phrase_count = 7 # 片語數
 [telegram]
 enabled = true # 啟用 Telegram 推送
 delivery = "telegraph" # Telegraph 即時檢視；messages 為逐則傳送
-send_report_file = false # 附上完整報告檔案
+send_report_file = true # 每週附上完整報告檔案
+cover_photo = true # 使用當期封面照片傳送摘要
 message_delay_seconds = 1.1 # 訊息間隔秒數
+
+[report]
+embed_images = true # 私人 HTML 報告內嵌封面與文章插圖
 
 [telegraph]
 author_name = "經濟學人導讀" # 頁面作者

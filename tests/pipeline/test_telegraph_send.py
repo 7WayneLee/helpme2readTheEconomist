@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from email import policy
+from email.parser import BytesParser
 import io
 import json
+import shutil
 from pathlib import Path
 from urllib.parse import parse_qs, unquote
 from urllib.request import OpenerDirector, Request
@@ -14,7 +17,7 @@ from econ_digest.cli import build_parser
 from econ_digest.config import Config, SecretsConfig
 from econ_digest.fetch import issue_directory
 from econ_digest.models import Digest, save_json
-from econ_digest.render.telegraph import original_text_messages
+from econ_digest.render.telegraph import caption_length, original_text_messages
 from econ_digest.state import load_state, save_state
 from econ_digest.telegraph import TelegraphClient, TelegraphError
 from econ_digest.telegram import TelegramClient, TelegramError
@@ -32,6 +35,7 @@ class DeliveryOpener(OpenerDirector):
         self.calls: list[tuple[str, dict]] = []
         self.messages: list[dict] = []
         self.documents = 0
+        self.photos: list[dict] = []
         self.creates = 0
         self.accounts = 0
         self.edits = 0
@@ -39,6 +43,7 @@ class DeliveryOpener(OpenerDirector):
         self.fail_message: int | None = None
         self.fail_edit: int | None = None
         self.fail_document = False
+        self.fail_photo = False
 
     def open(self, request: Request, timeout: float = 30) -> Response:
         if request.full_url.startswith("https://api.telegra.ph/"):
@@ -61,13 +66,25 @@ class DeliveryOpener(OpenerDirector):
                 result = {"path": path, "url": "https://telegra.ph/" + path}
         else:
             method = request.full_url.rsplit("/", 1)[-1]
-            payload = json.loads(request.data) if method == "sendMessage" else {}
+            if method == "sendMessage":
+                payload = json.loads(request.data)
+            else:
+                header = request.get_header("Content-type")
+                multipart = BytesParser(policy=policy.default).parsebytes(
+                    f"Content-Type: {header}\r\nMIME-Version: 1.0\r\n\r\n".encode() + request.data)
+                payload = {part.get_param("name", header="content-disposition"):
+                           part.get_payload(decode=True) if part.get_filename() else part.get_payload(decode=True).decode()
+                           for part in multipart.iter_parts()}
             self.calls.append((method, payload))
             if method == "sendMessage":
                 self.attempts += 1
                 if self.attempts == self.fail_message:
                     return Response(json.dumps({"ok": False, "error_code": 400, "description": "failure " + TOKEN}).encode())
                 self.messages.append(payload)
+            elif method == "sendPhoto":
+                if self.fail_photo:
+                    return Response(json.dumps({"ok": False, "error_code": 400, "description": "synthetic photo failure"}).encode())
+                self.photos.append(payload)
             else:
                 if self.fail_document:
                     return Response(json.dumps({"ok": False, "error_code": 400, "description": "failure " + TOKEN}).encode())
@@ -92,6 +109,117 @@ def prepared_telegraph(delivery_config: Config, delivery_digest: Digest, monkeyp
     monkeypatch.setattr(telegraph_setup, "TelegraphClient", lambda: TelegraphClient(opener=opener))
     monkeypatch.setattr(send, "TelegramClient", lambda token, **kw: TelegramClient(token, opener=opener, sleep=lambda _: None, **kw))
     return config, directory, opener
+
+
+@pytest.fixture
+def prepared_photo(prepared_telegraph: tuple, illustrated_epub: Path) -> tuple:
+    config, directory, opener = prepared_telegraph
+    config = replace(config, telegram=replace(config.telegram, send_report_file=True))
+    shutil.copyfile(illustrated_epub, directory / "TheEconomist.2026.10.03.epub")
+    return config, directory, opener
+
+
+def test_photo_summary_originals_document_order(prepared_photo: tuple, synthetic_pngs: dict[str, bytes]) -> None:
+    config, directory, opener = prepared_photo
+    assert send.send_digest(config) == 0
+    methods = [method for method, _ in opener.calls if method.startswith("send")]
+    digest = Digest.from_dict(json.loads((directory / "digest.json").read_text()))
+    assert methods == ["sendPhoto", *["sendMessage"] * len(original_text_messages(digest)), "sendDocument"]
+    caption = opener.photos[0]["caption"]
+    assert opener.photos[0]["photo"] == synthetic_pngs["cover"] and opener.photos[0]["parse_mode"] == "HTML"
+    assert caption_length(caption) <= 1024 and caption.count('<a href="') == 4
+    assert "原文（點開）" in opener.messages[0]["text"]
+    assert opener.calls[-1][1]["caption"] == "完整報告（含插圖與英文選文原文）"
+
+
+@pytest.mark.parametrize("failure", ["photo", "original", "document"])
+def test_photo_resume_does_not_repeat_completed_steps(prepared_photo: tuple, failure: str) -> None:
+    config, directory, opener = prepared_photo
+    opener.fail_photo = failure == "photo"
+    opener.fail_message = 1 if failure == "original" else None
+    opener.fail_document = failure == "document"
+    with pytest.raises(TelegramError):
+        send.send_digest(config)
+    progress = json.loads((directory / "telegram_progress.json").read_text())
+    assert progress["next_message"] == (0 if failure == "photo" else 1 if failure == "original" else 5)
+    originals_sent = len(opener.messages)
+    opener.fail_photo = opener.fail_document = False
+    opener.fail_message = None
+    assert send.send_digest(config) == 0
+    assert len(opener.photos) == 1 and opener.documents == 1
+    if failure == "document":
+        assert len(opener.messages) == originals_sent
+    assert opener.creates == 4 and opener.edits == 4
+
+
+def test_changed_cover_rejects_resume(prepared_photo: tuple, illustrated_epub: Path, synthetic_pngs: dict[str, bytes]) -> None:
+    from zipfile import ZipFile
+    config, directory, opener = prepared_photo
+    opener.fail_message = 1
+    with pytest.raises(TelegramError):
+        send.send_digest(config)
+    path = directory / "TheEconomist.2026.10.03.epub"
+    with ZipFile(path) as source:
+        contents = {name: source.read(name) for name in source.namelist()}
+    contents["EPUB/static_images/cover.png"] = synthetic_pngs["head"]
+    with ZipFile(path, "w") as archive:
+        for name, data in contents.items():
+            archive.writestr(name, data)
+    with pytest.raises(ValueError, match="已變更"):
+        send.send_digest(config)
+    assert len(opener.photos) == 1
+
+
+@pytest.mark.parametrize("fallback", ["missing-cover", "disabled", "messages"])
+def test_cover_fallback_and_messages_mode(prepared_photo: tuple, fallback: str) -> None:
+    from zipfile import ZipFile
+    from econ_digest.render import render_telegram
+    config, directory, opener = prepared_photo
+    if fallback == "missing-cover":
+        path = directory / "TheEconomist.2026.10.03.epub"
+        with ZipFile(path) as source:
+            contents = {name: source.read(name) for name in source.namelist() if not name.endswith("cover.png")}
+        with ZipFile(path, "w") as archive:
+            for name, data in contents.items():
+                archive.writestr(name, data)
+    elif fallback == "disabled":
+        config = replace(config, telegram=replace(config.telegram, cover_photo=False))
+    else:
+        config = replace(config, telegram=replace(config.telegram, delivery="messages"))
+        digest = Digest.from_dict(json.loads((directory / "digest.json").read_text()))
+        save_json(directory / "telegram_messages.json", render_telegram(digest))
+    assert send.send_digest(config) == 0
+    assert not opener.photos and opener.documents == 1
+    if fallback != "messages":
+        assert opener.messages[0]["text"].count('<a href="') == 4
+        assert "url" in opener.messages[0]["link_preview_options"]
+
+
+def test_long_caption_photo_then_summary_with_preview(prepared_photo: tuple) -> None:
+    config, directory, opener = prepared_photo
+    digest = Digest.from_dict(json.loads((directory / "digest.json").read_text()))
+    digest.issue.articles[0].title = "合成長標題" * 210
+    save_json(directory / "digest.json", digest)
+    # A failure after the photo proves the extra summary is an independent resume step.
+    opener.fail_message = 1
+    with pytest.raises(TelegramError):
+        send.send_digest(config)
+    assert len(opener.photos) == 1 and opener.photos[0]["caption"].startswith("<b>經濟學人導讀")
+    opener.fail_message = None
+    assert send.send_digest(config) == 0
+    assert len(opener.photos) == 1
+    assert "合成長標題" in opener.messages[0]["text"] and opener.messages[0]["text"].count('<a href="') == 4
+    assert "url" in opener.messages[0]["link_preview_options"]
+    assert "原文（點開）" in opener.messages[1]["text"]
+
+
+def test_photo_dry_run_shows_sequence_without_network(prepared_photo: tuple, capsys: pytest.CaptureFixture[str]) -> None:
+    config, directory, opener = prepared_photo
+    assert send.send_digest(replace(config, secrets=SecretsConfig()), dry_run=True) == 0
+    output = capsys.readouterr().out
+    assert output.index("封面照片") < output.index("原文（點開）") < output.index("--- 文件：")
+    assert "圖說可見長度" in output and "/1024 個 UTF-16 單位" in output
+    assert not opener.calls and not (directory / "telegram_progress.json").exists()
 
 
 def test_telegraph_send_summary_private_original_and_state(prepared_telegraph: tuple, delivery_digest: Digest) -> None:

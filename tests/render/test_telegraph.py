@@ -9,13 +9,60 @@ import pytest
 from econ_digest.models import Digest
 from econ_digest.render.common import english_article
 from econ_digest.render.telegraph import (article_nodes, original_text_messages, render_telegraph,
-                                        summary_message, with_navigation)
+                                        caption_length, summary_caption, summary_message, with_navigation)
 from econ_digest.telegraph import content_size, validate_nodes
 from econ_digest.telegram.format import check_html, strip_tags, utf16_len
 
 
 def all_text(nodes: list) -> str:
     return "\n".join(item if isinstance(item, str) else all_text(item.get("children", [])) for item in nodes)
+
+
+def test_public_pages_never_contain_media(sample_digest: Digest) -> None:
+    pages = render_telegraph(sample_digest, 10000)
+    urls = {page.key: "https://telegra.ph/synthetic" for page in pages}
+
+    def inspect(nodes: list) -> None:
+        for item in nodes:
+            if isinstance(item, dict):
+                assert item["tag"] not in {"img", "figure", "video", "iframe"}
+                inspect(item.get("children", []))
+
+    for page in with_navigation(pages, urls):
+        inspect(page.nodes)
+
+
+def test_caption_measures_visible_utf16() -> None:
+    assert caption_length('<b>台灣 &amp; &#128512;</b><a href="https://example.invalid/long-url">連結</a>') == 9
+
+
+@pytest.mark.parametrize("length,separate", [(1024, False), (1025, True)])
+def test_caption_exact_limit(no_taiwan_digest: Digest, length: int, separate: bool) -> None:
+    digest = no_taiwan_digest
+    pages = render_telegraph(digest)
+    urls = {page.key: "https://telegra.ph/" + "x" * 400 for page in pages}
+    # Change the English selection title in the visible overview to hit the limit.
+    article = english_article(digest)
+    assert article is not None
+    current = caption_length(summary_message(digest, pages, urls))
+    article.title += "文" * (length - current)
+    caption, followup = summary_caption(digest, pages, urls)
+    assert followup is separate
+    assert caption_length(caption) <= 1024
+    if not separate:
+        assert caption_length(caption) == 1024
+
+
+def test_caption_drops_taiwan_block_first(sample_digest: Digest) -> None:
+    pages = render_telegraph(sample_digest)
+    urls = {page.key: "https://telegra.ph/synthetic" for page in pages}
+    for classification in sample_digest.classifications.values():
+        if classification.taiwan_level:
+            classification.title_zh = "合成台灣相關標題" * 40
+    assert caption_length(summary_message(sample_digest, pages, urls)) > 1024
+    caption, separate = summary_caption(sample_digest, pages, urls)
+    assert not separate and "與台灣相關" not in caption
+    assert caption == summary_message(sample_digest, pages, urls, include_taiwan=False)
 
 
 def test_four_pages_order_and_complete_fields(sample_digest: Digest) -> None:

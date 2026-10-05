@@ -10,9 +10,10 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ..config import Config
+from ..images import load_issue_images
 from ..models import Digest, load_json, save_json
 from ..render.telegraph import (PREVIEW_URL, original_text_messages, render_telegraph,
-                                summary_message, with_navigation)
+                                caption_length, summary_caption, summary_message, with_navigation)
 from ..state import AlreadyRunning, load_state, run_lock, save_state, utc_now
 from ..telegraph import TelegraphClient, content_size
 from ..telegraph.publish import load_pages, publish_pages
@@ -55,6 +56,15 @@ def _validate_messages(messages: list[str]) -> None:
             raise ValueError("Telegram 訊息超過 4000 個 UTF-16 單位；請重新 render")
 
 
+def _telegraph_messages(digest: Digest, pages: list, urls: dict[str, str], originals: list[str],
+                        *, photo: bool) -> tuple[list[str], int]:
+    summary = summary_message(digest, pages, urls)
+    if not photo:
+        return [summary, *originals], 0
+    caption, separate = summary_caption(digest, pages, urls)
+    return [caption, *([summary] if separate else []), *originals], 1 if separate else -1
+
+
 def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = False,
                 dry_run: bool = False, pages_only: bool = False,
                 log: Callable[[str], None] = print) -> int:
@@ -74,6 +84,7 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
             log("本期已傳送；如需再次傳送，請加上 --force。")
             return 0
     pages_path = directory / "telegraph_pages.json"
+    cover = None
     if telegraph:
         stored = load_pages(pages_path)
         reserve = max([len(PREVIEW_URL), *[len(page.url.encode("utf-8")) for page in stored]])
@@ -91,7 +102,10 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
                 log(f"已更新 {len(published)} 個 Telegraph 頁面。")
             return 0
         originals = original_text_messages(digest)
-        messages = [summary_message(digest, pages, urls), *originals]
+        epub = directory / f"TheEconomist.{digest.issue_date}.epub"
+        if config.telegram.cover_photo and epub.exists():
+            cover = load_issue_images(epub).cover
+        messages, summary_index = _telegraph_messages(digest, pages, urls, originals, photo=cover is not None)
     else:
         messages = json.loads((directory / "telegram_messages.json").read_text(encoding="utf-8"))
     _validate_messages(messages)
@@ -101,13 +115,18 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
             for page in with_navigation(pages, urls):
                 log(f"{page.title}｜{content_size(page.nodes)} 位元組")
         for index, message in enumerate(messages, 1):
-            log(f"--- 訊息 {index}/{len(messages)} ---\n{message}")
+            if cover is not None and index == 1:
+                log(f"--- 封面照片 {index}/{len(messages)}｜圖說可見長度 {caption_length(message)}/1024 個 UTF-16 單位 ---\n{message}")
+            else:
+                log(f"--- 訊息 {index}/{len(messages)} ---\n{message}")
+        if config.telegram.send_report_file:
+            log(f"--- 文件：{directory / 'report.html'} ---\n完整報告（含插圖與英文選文原文）")
         return 0
     assert token is not None and chat_id is not None
     report_path = directory / "report.html"
     report_bytes = report_path.read_bytes() if config.telegram.send_report_file else b""
     payload = ([[asdict(page) for page in pages], originals, chat_id, config.telegram.send_report_file,
-                asdict(config.telegraph), "telegraph"] if telegraph
+                asdict(config.telegraph), "telegraph", hashlib.sha256(cover.data).hexdigest() if cover else None] if telegraph
                else [messages, chat_id, config.telegram.send_report_file])
     fingerprint = hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode("utf-8") + report_bytes).hexdigest()
     progress_path = directory / "telegram_progress.json"
@@ -122,19 +141,21 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
             save_json(progress_path, progress)
         elif any(page.key not in known_urls for page in pages):
             raise ValueError("已發布的 Telegraph 頁面紀錄遺失；請檢查 telegraph_pages.json")
-        messages = [summary_message(digest, pages, urls), *originals]
+        messages, summary_index = _telegraph_messages(digest, pages, urls, originals, photo=cover is not None)
         _validate_messages(messages)
     next_message = progress["next_message"]
     client = TelegramClient(token, min_interval=config.telegram.message_delay_seconds)
     for index in range(next_message, len(messages)):
-        if telegraph and index == 0:
+        if cover is not None and index == 0:
+            client.send_photo_safe(chat_id, cover.data, filename="cover.jpg", caption_html=messages[index])
+        elif telegraph and index == summary_index:
             client.send_message_safe(chat_id, messages[index], link_preview_url=urls[pages[0].key])
         else:
             client.send_message_safe(chat_id, messages[index])
         progress["next_message"] = index + 1
         save_json(progress_path, progress)
     if config.telegram.send_report_file and not progress["document_sent"]:
-        client.send_document(chat_id, report_path, caption_html="完整報告（含英文選文原文）")
+        client.send_document(chat_id, report_path, caption_html="完整報告（含插圖與英文選文原文）")
         progress["document_sent"] = True
         save_json(progress_path, progress)
     state["delivered"][digest.issue_date] = {"delivered_at": utc_now(), "message_count": len(messages)}

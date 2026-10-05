@@ -30,7 +30,7 @@ def run(args: argparse.Namespace, config: Config) -> int:
     try:
         directory = saved_issue_directory(config, args.issue)
         digest = load_json(directory / "digest.json", Digest)
-        paths = write_outputs(digest, directory)
+        paths = write_outputs(digest, directory, embed_images=config.report.embed_images)
         for label, path in paths.items():
             print(f"{label}：{path}")
         messages = json.loads(paths["telegram"].read_text(encoding="utf-8"))

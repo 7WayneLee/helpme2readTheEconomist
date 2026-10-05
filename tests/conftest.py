@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from html import escape
 import os
+import random
 from pathlib import Path
+import struct
+import zlib
 from zipfile import ZIP_STORED, ZipFile
 
 import pytest
@@ -109,3 +112,56 @@ def synthetic_issue(synthetic_epub: Path) -> Issue:
 @pytest.fixture
 def synthetic_article(synthetic_issue: Issue) -> Article:
     return synthetic_issue.articles[0]
+
+
+@pytest.fixture
+def synthetic_pngs() -> dict[str, bytes]:
+    """Valid, generated raster bytes; no copyrighted test assets."""
+    def png(seed: int, size: int = 32) -> bytes:
+        def chunk(kind: bytes, data: bytes) -> bytes:
+            return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+        rng = random.Random(seed)
+        rows = b"".join(b"\0" + rng.randbytes(size * 3) for _ in range(size))
+        return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0))
+                + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+    return {**{name: png(index) for index, name in enumerate(("cover", "head", "inline", "leader", "promo"))},
+            "small": png(9, 1)}
+
+
+@pytest.fixture
+def illustrated_epub(synthetic_epub: Path, synthetic_pngs: dict[str, bytes], tmp_path: Path) -> Path:
+    path = tmp_path / "illustrated.epub"
+    with ZipFile(synthetic_epub) as source:
+        contents = {name: source.read(name) for name in source.namelist()}
+    opf = contents["EPUB/content.opf"].decode()
+    opf = opf.replace("<manifest>", '<metadata><meta name="cover" content="cover-img"/></metadata><manifest>')
+    opf = opf.replace("</manifest>", "".join(
+        f'<item id="{name}-img" href="static_images/{name}.png" media-type="image/png"'
+        + (' properties="cover-image"' if name == "cover" else "") + "/>"
+        for name in synthetic_pngs) + '</manifest>')
+    # A nested article exercises ../ resolution and encoded filenames.
+    opf = opf.replace('href="normal.html"', 'href="articles/normal.html"')
+    contents["EPUB/content.opf"] = opf.encode()
+    for name in list(contents):
+        if not name.endswith(".html"):
+            continue
+        html = contents[name].decode().replace("photo.jpg", "static_images/head.png").replace("chart.jpg", "static_images/inline.png")
+        if name.endswith("cover-leader.html"):
+            html = html.replace("static_images/head.png", "static_images/leader.png")
+        if name.endswith("normal.html"):
+            html = html.replace("<body>", '<body><p><img src="static_images/inline.png"/></p>')
+            html = html.replace("</body>", '<img src="static_images/head.png"/><img src="static_images/small.png"/>'
+                                '<img src="static_images/mastheadImage.jpg"/><img src="static_images/ereader.png"/>'
+                                '<img src="missing.png"/><img src="https://example.invalid/external.png"/></body>')
+            html = html.replace("static_images/", "../static_images/").replace("head.png", "he%61d.png")
+            del contents[name]
+            name = "EPUB/articles/normal.html"
+        contents[name] = html.encode()
+    for name, data in synthetic_pngs.items():
+        contents[f"EPUB/static_images/{name}.png"] = data
+    contents["EPUB/static_images/mastheadImage.jpg"] = synthetic_pngs["promo"]
+    contents["EPUB/static_images/ereader.png"] = synthetic_pngs["promo"]
+    with ZipFile(path, "w") as archive:
+        for name, data in contents.items():
+            archive.writestr(name, data)
+    return path

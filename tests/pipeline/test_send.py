@@ -63,7 +63,7 @@ def test_resume_after_middle_failure(delivery_config: Config, delivery_digest: D
     client.fail_message = None
     assert send.send_digest(delivery_config) == 0
     assert client.messages == ["<b>First</b>", "Second", "Third"]
-    assert client.documents == ["完整報告（含英文選文原文）"]
+    assert client.documents == ["完整報告（含插圖與英文選文原文）"]
     state = load_state(delivery_config.paths.data_dir)
     assert state["delivered"][delivery_digest.issue_date]["message_count"] == 3
     assert state["english_history"][0]["article_id"] == delivery_digest.english.article_id  # type: ignore[union-attr]

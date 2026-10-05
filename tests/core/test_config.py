@@ -28,7 +28,9 @@ def test_defaults_and_frozen_tree(tmp_path: Path) -> None:
     assert config.english.level.startswith("全民英檢中級")
     assert config.telegram.message_delay_seconds == 1.1
     assert config.telegram.delivery == "telegraph"
-    assert config.telegram.send_report_file is False
+    assert config.telegram.send_report_file is True
+    assert config.telegram.cover_photo is True
+    assert config.report.embed_images is True
     assert config.telegraph.author_name == "經濟學人導讀"
     assert config.telegraph.author_url == ""
     assert config.telegraph.page_limit_bytes == 60000
@@ -82,6 +84,8 @@ force_tier_by_kind = {}
     ('[llm.models]\nclassify = [42]', "llm.models.classify[0]"),
     ('[paths]\ndata_dir = 3', "paths.data_dir"),
     ('[telegram]\nenabled = "true"', "telegram.enabled"),
+    ('[telegram]\ncover_photo = "true"', "telegram.cover_photo"),
+    ('[report]\nembed_images = "true"', "report.embed_images"),
     ('[telegram]\nmessage_delay_seconds = -1', "telegram.message_delay_seconds"),
     ('[telegram]\nmessage_delay_seconds = nan', "telegram.message_delay_seconds"),
     ('[telegram]\ndelivery = "other"', "telegram.delivery"),

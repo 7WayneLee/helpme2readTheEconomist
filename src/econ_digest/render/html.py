@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import base64
 from html import escape
 from importlib.resources import files
 
 from ..models import Digest
+from ..images import ImageBlob, IssueImages
 from ..taxonomy import TIERS
 from .common import (TAIWAN_TAG, Entry, english_article, generation_time, merged_leader_titles,
                      metadata, ordered_brief, overview, sections, skipped, statistics, summary_fields, title,
@@ -20,7 +22,15 @@ def bullets(values: list[str]) -> str:
     return "<ul>" + "".join(f"<li>{escape(value)}</li>" for value in values) + "</ul>"
 
 
-def article_html(digest: Digest, entry: Entry) -> str:
+def image_html(blob: ImageBlob, alt: str, *, caption: str | None = None, cover: bool = False) -> str:
+    source = f"data:{blob.mime};base64,{base64.b64encode(blob.data).decode('ascii')}"
+    attributes = ' class="issue-cover"' if cover else ""
+    loading = "" if cover else ' loading="lazy"'
+    label = f"<figcaption>{escape(caption)}</figcaption>" if caption else ""
+    return f'<figure{attributes}><img src="{escape(source, quote=True)}" alt="{escape(alt, quote=True)}"{loading}>{label}</figure>'
+
+
+def article_html(digest: Digest, entry: Entry, images: IssueImages | None = None) -> str:
     level, tier = entry.classification.taiwan_level, entry.summary.tier
     header = f'<h4>{escape(entry.classification.title_zh)}</h4><p lang="en"><i>{escape(entry.article.title)}</i></p>'
     header += paragraph(metadata(entry))
@@ -37,7 +47,18 @@ def article_html(digest: Digest, entry: Entry) -> str:
         body += "<h5>📰 經濟學人社論立場</h5>" + "".join(paragraph(v) for v in merged_leader_titles(digest, entry))
         body += paragraph(entry.summary.leader_stance)
     opened = " open" if tier in ("A", "B") else ""
-    return '<article class="story">' + header + "<h5>一句話重點</h5>" + paragraph(headline[1][0]) + f"<details{opened}><summary>閱讀摘要</summary>" + body + "</details></article>"
+    illustrations = ""
+    if images:
+        illustrations = "".join(image_html(blob, entry.classification.title_zh + " 插圖")
+                                for blob in images.by_article.get(entry.article.id, []))
+        for leader in digest.issue.articles:
+            classification = digest.classifications.get(leader.id)
+            if (leader.kind == "leader" and classification is not None and classification.tier == "merged"
+                    and (classification.companion_id == entry.article.id
+                         or entry.classification.companion_id == leader.id)):
+                illustrations += "".join(image_html(blob, classification.title_zh + " 插圖", caption="社論插圖")
+                                         for blob in images.by_article.get(leader.id, []))
+    return '<article class="story">' + header + "<h5>一句話重點</h5>" + paragraph(headline[1][0]) + f"<details{opened}><summary>閱讀摘要</summary>" + body + "</details>" + illustrations + "</article>"
 
 
 def english_html(digest: Digest) -> str:
@@ -72,10 +93,11 @@ def english_html(digest: Digest) -> str:
     return result
 
 
-def render_html(digest: Digest) -> str:
+def render_html(digest: Digest, images: IssueImages | None = None) -> str:
     groups = sections(digest)
     toc = [("brief", "本週要聞速覽"), *[(s.anchor, s.title) for s in groups[3:]], ("english", "英文學習選文"), ("appendix", "附錄")]
-    body = f"<header><h1>{escape(title(digest))}</h1>" + paragraph("產生時間：" + generation_time(digest)) + paragraph(overview(digest)) + "</header>"
+    cover = image_html(images.cover, title(digest) + " 封面", cover=True) if images and images.cover else ""
+    body = f"<header><h1>{escape(title(digest))}</h1>" + cover + paragraph("產生時間：" + generation_time(digest)) + paragraph(overview(digest)) + "</header>"
     chips = [f'<a class="toc-chip" href="#{anchor}">{escape(label)}</a>' for anchor, label in toc]
     taiwan = '<span class="toc-group"><a href="#taiwan">台灣</a>' + "".join(
         f'<a href="#{section.anchor}">T{index}</a>' for index, section in enumerate(groups[:3], 1)) + '</span>'
@@ -88,13 +110,22 @@ def render_html(digest: Digest) -> str:
             badge = f'<span class="badge taiwan">{TAIWAN_TAG}</span> ' if item.taiwan_related else ""
             body += f"<li>{badge}{escape(item.text_zh)}</li>"
         body += "</ul>"
+        if images:
+            kind = "world_politics" if label == "政治" else "world_business"
+            body += "".join(image_html(blob, label + "要聞 插圖") for article in digest.issue.articles
+                            if article.kind == kind for blob in images.by_article.get(article.id, []))
+    if images:
+        cartoons = [blob for article in digest.issue.articles if article.kind == "cartoon"
+                    for blob in images.by_article.get(article.id, [])]
+        if cartoons:
+            body += "<h3>本週漫畫</h3>" + "".join(image_html(blob, "本週漫畫 插圖") for blob in cartoons)
     body += '</section><section id="taiwan"><h2>台灣</h2>'
     for index, section in enumerate(groups):
         if index == 3:
             body += "</section>"
         heading = "h3" if section.anchor.startswith("taiwan-") else "h2"
         body += f'<section id="{section.anchor}"><{heading}>{escape(section.title)}</{heading}>'
-        body += "".join(article_html(digest, entry) for entry in section.entries) if section.entries else paragraph("本期沒有這類文章。")
+        body += "".join(article_html(digest, entry, images) for entry in section.entries) if section.entries else paragraph("本期沒有這類文章。")
         body += "</section>"
     if len(groups) == 3:
         body += "</section>"

@@ -259,11 +259,18 @@ class TelegramClient:
             description = ""
         if file_content is None:
             raise TelegramError(None, description) from None
+        return self._upload("sendDocument", "document", chat_id, file_content, safe_filename,
+                            content_type, caption_html, parse_html=True)
+
+    def _upload(self, method: str, field: str, chat_id: ChatId, data: bytes, filename: str,
+                mime: str, caption: str | None, *, parse_html: bool) -> int:
         boundary = f"econ-digest-{uuid.uuid4().hex}"
         parts: list[bytes] = []
         fields = {"chat_id": str(chat_id)}
-        if caption_html is not None:
-            fields.update({"caption": caption_html, "parse_mode": "HTML"})
+        if caption is not None:
+            fields["caption"] = caption
+            if parse_html:
+                fields["parse_mode"] = "HTML"
         for name, value in fields.items():
             parts.append(
                 f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode(
@@ -271,16 +278,39 @@ class TelegramClient:
                 )
             )
         parts.append(
-            f'--{boundary}\r\nContent-Disposition: form-data; name="document"; '
-            f'filename="{safe_filename}"\r\nContent-Type: {content_type}\r\n\r\n'.encode("utf-8")
-            + file_content
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; '
+            f'filename="{filename}"\r\nContent-Type: {mime}\r\n\r\n'.encode("utf-8")
+            + data
             + b"\r\n"
         )
         parts.append(f"--{boundary}--\r\n".encode("ascii"))
         result = self._request(
-            "sendDocument", b"".join(parts), f"multipart/form-data; boundary={boundary}", sending=True
+            method, b"".join(parts), f"multipart/form-data; boundary={boundary}", sending=True
         )
         return self._message_id(result)
+
+    def send_photo(self, chat_id: ChatId, photo: bytes, *, filename: str = "cover.jpg",
+                   caption_html: str | None = None) -> int:
+        return self._photo(chat_id, photo, filename, caption_html, parse_html=True)
+
+    def _photo(self, chat_id: ChatId, photo: bytes, filename: str, caption: str | None,
+               *, parse_html: bool) -> int:
+        if not filename or any(character in filename for character in "\r\n\x00"):
+            raise ValueError("照片檔名不可為空白或含換行及 NUL 字元")
+        safe_filename = filename.replace("\\", "\\\\").replace('"', '\\"')
+        mime = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        return self._upload("sendPhoto", "photo", chat_id, photo, safe_filename, mime,
+                            caption, parse_html=parse_html)
+
+    def send_photo_safe(self, chat_id: ChatId, photo: bytes, *, filename: str = "cover.jpg",
+                        caption_html: str | None = None) -> int:
+        try:
+            return self.send_photo(chat_id, photo, filename=filename, caption_html=caption_html)
+        except TelegramError as error:
+            if error.status != 400 or "can't parse entities" not in error.description.lower():
+                raise
+        _LOGGER.warning("Telegram 圖說格式解析失敗；改用純文字重試")
+        return self._photo(chat_id, photo, filename, strip_tags(caption_html or ""), parse_html=False)
 
 
 def discover_private_chats(client: TelegramClient) -> list[dict[str, Any]]:

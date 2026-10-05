@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 
 from ..models import Digest
 from ..telegraph.nodes import Node, content_size, node, validate_nodes
-from ..telegram.format import blockquote, bold, check_html, escape, link, split_html, utf16_len
+from ..telegram.format import blockquote, bold, check_html, escape, link, split_html, strip_tags, utf16_len
 from .common import (TAIWAN_TAG, Entry, english_article, entries, merged_leader_titles, metadata,
                      ordered_brief, overview, sections, summary_fields, title, word_count_label)
 
@@ -186,11 +186,11 @@ def render_telegraph(digest: Digest, page_limit_bytes: int = 60000, *,
         planned = packed
 
 
-def summary_message(digest: Digest, pages: list[Page], urls: dict[str, str]) -> str:
+def summary_message(digest: Digest, pages: list[Page], urls: dict[str, str], *, include_taiwan: bool = True) -> str:
     lines = ["📰 " + bold(title(digest)), escape(overview(digest))]
     taiwan = sorted((item for item in entries(digest) if item.classification.taiwan_level),
                     key=lambda item: (item.classification.taiwan_level, item.article.order))
-    if taiwan:
+    if taiwan and include_taiwan:
         lines.append(bold("與台灣相關"))
         lines.extend("• " + escape(item.classification.title_zh) for item in taiwan[:3])
     lines.append("")
@@ -201,6 +201,21 @@ def summary_message(digest: Digest, pages: list[Page], urls: dict[str, str]) -> 
     if utf16_len(message) > 4000:
         raise ValueError("導讀摘要訊息超過 Telegram 上限")
     return message
+
+
+def caption_length(html: str) -> int:
+    """Telegram counts decoded visible caption text in UTF-16 units."""
+    return utf16_len(strip_tags(html))
+
+
+def summary_caption(digest: Digest, pages: list[Page], urls: dict[str, str]) -> tuple[str, bool]:
+    """Return a fitting caption and whether to send the full summary separately."""
+    caption = summary_message(digest, pages, urls)
+    if caption_length(caption) > 1024:
+        caption = summary_message(digest, pages, urls, include_taiwan=False)
+    if caption_length(caption) > 1024:
+        return bold(title(digest)), True
+    return caption, False
 
 
 def original_text_messages(digest: Digest, limit: int = 4000) -> list[str]:

@@ -82,7 +82,8 @@ class EnglishConfig:
 @dataclass(frozen=True)
 class TelegramConfig:
     enabled: bool = True
-    send_report_file: bool = False
+    send_report_file: bool = True
+    cover_photo: bool = True
     message_delay_seconds: float = 1.1
     delivery: str = "telegraph"
 
@@ -92,6 +93,11 @@ class TelegraphConfig:
     author_name: str = "經濟學人導讀"
     author_url: str = ""
     page_limit_bytes: int = 60000
+
+
+@dataclass(frozen=True)
+class ReportConfig:
+    embed_images: bool = True
 
 
 @dataclass(frozen=True)
@@ -111,6 +117,7 @@ class Config:
     english: EnglishConfig = field(default_factory=EnglishConfig)
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     telegraph: TelegraphConfig = field(default_factory=TelegraphConfig)
+    report: ReportConfig = field(default_factory=ReportConfig)
     secrets: SecretsConfig = field(default_factory=SecretsConfig, repr=False)
 
 
@@ -291,6 +298,6 @@ def load_config(path: str | Path | None = None) -> Config:
     _validate(config)
     return Config(
         paths=config.paths, source=config.source, llm=config.llm, tiers=config.tiers,
-        english=config.english, telegram=config.telegram, telegraph=config.telegraph,
+        english=config.english, telegram=config.telegram, telegraph=config.telegraph, report=config.report,
         secrets=_load_secrets(),
     )

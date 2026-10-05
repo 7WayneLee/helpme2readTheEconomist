@@ -83,7 +83,7 @@ def _run_locked(config: Config, issue_spec: str, *, no_send: bool, dry_run: bool
                 save_json(issue_path, issue)
                 digest = _analyze(issue, config, state, log)
                 save_json(digest_path, digest)
-            paths = write_outputs(digest, directory)
+            paths = write_outputs(digest, directory, embed_images=config.report.embed_images)
             ready = config.secrets.telegram_bot_token and config.secrets.telegram_chat_id
             if no_send or dry_run or not config.telegram.enabled or not ready:
                 log(f"報告已產生：{paths['html']}")

@@ -157,6 +157,83 @@ def test_send_document_without_caption_and_unknown_mime(tmp_path: Path) -> None:
     assert b"synthetic\x00\xff" in body
 
 
+def multipart_parts(request: Request) -> dict:
+    message = BytesParser(policy=policy.default).parsebytes(
+        f"Content-Type: {request.get_header('Content-type')}\r\nMIME-Version: 1.0\r\n\r\n".encode() + request.data)
+    return {part.get_param("name", header="content-disposition"): part for part in message.iter_parts()}
+
+
+def test_send_photo_multipart(synthetic_pngs: dict[str, bytes]) -> None:
+    client, opener, _ = make_client([success()])
+    assert client.send_photo(123, synthetic_pngs["cover"], caption_html="<b>本週封面</b>") == 42
+    request = opener.requests[0]
+    assert request.full_url.endswith("/sendPhoto")
+    parts = multipart_parts(request)
+    assert set(parts) == {"chat_id", "caption", "parse_mode", "photo"}
+    assert parts["photo"].get_filename() == "cover.jpg"
+    assert parts["photo"].get_content_type() == "image/jpeg"
+    assert parts["photo"].get_payload(decode=True) == synthetic_pngs["cover"]
+    assert parts["caption"].get_payload(decode=True).decode() == "<b>本週封面</b>"
+    assert parts["chat_id"].get_payload(decode=True) == b"123"
+
+
+def test_send_photo_no_caption(synthetic_pngs: dict[str, bytes]) -> None:
+    client, opener, _ = make_client([success()])
+    client.send_photo(1, synthetic_pngs["cover"], filename="cover.png")
+    parts = multipart_parts(opener.requests[0])
+    assert set(parts) == {"chat_id", "photo"}
+    assert parts["photo"].get_content_type() == "image/png"
+
+
+@pytest.mark.parametrize("filename", ["", "bad\r\n.png", "bad\x00.jpg"])
+def test_photo_rejects_invalid_filename(filename: str) -> None:
+    client, opener, _ = make_client([])
+    with pytest.raises(ValueError):
+        client.send_photo(1, b"synthetic", filename=filename)
+    assert not opener.requests
+
+
+def test_photo_plain_caption_fallback_once(synthetic_pngs: dict[str, bytes], caplog: pytest.LogCaptureFixture) -> None:
+    client, opener, timer = make_client([api_error(400, "can't parse entities " + _TOKEN), success()], min_interval=1.1)
+    client.send_photo_safe(7, synthetic_pngs["cover"], caption_html="<b>台灣 &amp; 😀</b>")
+    first, plain = map(multipart_parts, opener.requests)
+    assert first["parse_mode"].get_payload(decode=True) == b"HTML"
+    assert "parse_mode" not in plain
+    assert plain["caption"].get_payload(decode=True).decode() == "台灣 & 😀"
+    assert plain["photo"].get_payload(decode=True) == synthetic_pngs["cover"]
+    assert timer.sleeps == [1.1] and _TOKEN not in caplog.text
+
+
+@pytest.mark.parametrize("status,description,attempts", [(400, "can't parse entities", 2), (400, "chat not found", 1),
+                                                       (403, "can't parse entities", 1)])
+def test_safe_photo_fallback_error_propagates(status: int, description: str, attempts: int) -> None:
+    client, opener, _ = make_client([api_error(status, description) for _ in range(attempts)])
+    with pytest.raises(TelegramError):
+        client.send_photo_safe(1, b"synthetic", caption_html="<b>測試</b>")
+    assert len(opener.requests) == attempts
+
+
+def test_photo_retries_and_redaction() -> None:
+    description = "Failure " + _URL
+    client, opener, timer = make_client([api_error(429, retry_after=2), api_error(502), success()])
+    client.send_photo_safe(1, b"synthetic")
+    assert timer.sleeps == [2.5, 2] and len(opener.requests) == 3
+    client, _, _ = make_client([api_error(400, description)])
+    with pytest.raises(TelegramError) as caught:
+        client.send_photo_safe(1, b"synthetic")
+    assert _TOKEN not in "".join(traceback.format_exception(caught.value))
+
+
+def test_photo_paces_between_message_and_document(tmp_path: Path) -> None:
+    document = tmp_path / "report.html"
+    document.write_text("合成報告")
+    client, opener, timer = make_client([success()] * 3, min_interval=1.1)
+    client.send_message(1, "第一則")
+    client.send_photo(1, b"synthetic")
+    client.send_document(1, document)
+    assert opener.times == pytest.approx([0, 1.1, 2.2]) and timer.sleeps == [1.1, 1.1]
+
+
 @pytest.mark.parametrize("filename", ["bad\r\nInjected: value.html", "bad\x00.html", ""])
 def test_send_document_rejects_invalid_filename(tmp_path: Path, filename: str) -> None:
     client, opener, _ = make_client([])
