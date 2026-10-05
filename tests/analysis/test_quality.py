@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 from pathlib import Path
 
 import pytest
@@ -23,7 +24,7 @@ from econ_digest.llm import FakeLLMClient, LLMError
 from econ_digest.models import ArticleSummary, BriefItem, Classification, Source, WeekBrief
 from econ_digest.render.common import sections
 from econ_digest.research.cna import CNAClient, Evidence
-from conftest import answer, article, issue, summary
+from conftest import answer, article, issue, payload, summary
 
 
 def test_model_routes_and_example(tmp_path: Path) -> None:
@@ -293,19 +294,34 @@ def test_grounding_drops_invalid_bases_downgrades_and_moves_to_category(analysis
     assert [section.anchor for section in sections(digest)] == ['tech']
 
 
-def test_ground_link_valid_sources_and_focus_depth(analysis_config: Config) -> None:
+@pytest.mark.parametrize('proposed', [0, 1, 2, 3])
+def test_focus_keeps_level_zero_and_applies_only_valid_implications(analysis_config: Config, proposed: int) -> None:
     source = issue([article('a1')])
     classes = {'a1': Classification('a1', 0, False, None, 'tech', '合成標題', tier='A')}
     summaries = {'a1': ArticleSummary('a1', 'A', '原摘要')}
     evidence = {'a1': [sample_evidence()]}
-    data = {'articles': [{'article_id': 'a1', 'taiwan_level': 3,
+    data = {'articles': [{'article_id': 'a1', 'taiwan_level': proposed,
                           'taiwan_link': {'text_zh': '（推論）具體合成關聯。', 'basis': ['cna1']},
-                          'taiwan_implications': []}]}
+                          'taiwan_implications': [{'text_zh': '（推論）合成政策改變台灣企業成本。',
+                                                   'basis': ['article', 'cna1']},
+                                                  {'text_zh': '缺乏依據的意涵。', 'basis': ['unknown']}]}]}
     apply_grounding(data, source, classes, summaries, evidence, analysis_config, ['a1'])
-    assert classes['a1'].tier == 'A' and classes['a1'].sources == [sample_evidence().source]
+    assert classes['a1'].taiwan_level == 0 and classes['a1'].taiwan_link is None
+    assert classes['a1'].tier == summaries['a1'].tier == 'A' and classes['a1'].sources == []
+    assert summaries['a1'].taiwan_implications == ['（推論）合成政策改變台灣企業成本。']
+    assert summaries['a1'].sources == [sample_evidence().source]
+    from econ_digest.models import Digest
+    digest = Digest(source.issue_date, '2026-10-05T00:00:00Z', source, classes, summaries, None, None,
+                    focus_ids=['a1'])
+    assert [(section.anchor, [entry.article.id for entry in section.entries])
+            for section in sections(digest)] == [('focus', ['a1'])]
 
 
-@pytest.mark.parametrize('provisional, proposed, final', [(3, 1, 3), (3, 2, 3), (0, 1, 3), (2, 1, 2), (1, 3, 3)])
+@pytest.mark.parametrize('provisional, proposed, final', [
+    (1, 0, 0), (1, 1, 1), (1, 2, 2), (1, 3, 3),
+    (2, 0, 0), (2, 1, 2), (2, 2, 2), (2, 3, 3),
+    (3, 0, 0), (3, 1, 3), (3, 2, 3), (3, 3, 3),
+])
 def test_grounding_cannot_promote_an_article_subject_from_external_context(analysis_config, provisional, proposed, final):
     source = issue([article('a1')])
     classes = {'a1': Classification('a1', provisional, False, '合成關聯', 'tech', '合成標題', tier='C')}
@@ -314,6 +330,34 @@ def test_grounding_cannot_promote_an_article_subject_from_external_context(analy
                           'taiwan_implications': []}]}
     apply_grounding(data, source, classes, {}, {'a1': []}, analysis_config, [])
     assert classes['a1'].taiwan_level == final
+
+
+@pytest.mark.parametrize('text', ['合成政策改變台灣企業成本。', '（推論）合成政策改變台灣企業成本。'])
+def test_no_mention_grounded_link_starts_with_inference_label(analysis_config, text):
+    source = issue([article('a1')])
+    classes = {'a1': Classification('a1', 3, False, '暫定關聯', 'tech', '合成標題', tier='C')}
+    evidence = {'a1': [sample_evidence()]}
+    data = {'articles': [{'article_id': 'a1', 'taiwan_level': 3,
+                          'taiwan_link': {'text_zh': text, 'basis': ['cna1']}, 'taiwan_implications': []}]}
+    apply_grounding(data, source, classes, {}, evidence, analysis_config, [])
+    assert classes['a1'].taiwan_link == '（推論）合成政策改變台灣企業成本。'
+    assert classes['a1'].sources == [sample_evidence().source]
+
+
+def test_ground_prompt_lists_fixed_zero_articles_and_requires_main_subject(analysis_config):
+    source = issue([article(f'a{i}') for i in range(1, 5)])
+    classes = {a.id: Classification(a.id, 3 if a.id == 'a2' else 0, False, None,
+                                  'tech', '合成標題', tier='A') for a in source.articles}
+    units = grounding_units(source, list(classes), classes, {}, {a.id: [] for a in source.articles}, analysis_config)
+    assert [payload(unit.prompt, '本批次等級固定為 0 的文章 id：') for unit in units] == [['a1', 'a3'], ['a4']]
+    for unit in units:
+        assert unit.prompt_bytes <= 90_000 and len(unit.article_ids) <= 3
+        assert 'taiwan_level 必須為 0、taiwan_link 必須為 null，不得升級' in unit.prompt
+        assert '必須從文章的主要主題直接推導' in unit.prompt
+        assert '原文僅順帶提及的另一事件' in unit.prompt
+        assert '伊朗戰爭 → 美國軍備庫存 → 對台軍售交付' in unit.prompt
+        assert '有疑慮就不寫' in unit.prompt
+        assert '標記「（推論）」' in unit.prompt and '每個 basis 是非空清單' in unit.prompt
 
 
 def test_cna_unreachable_grounding_fallback_and_cache(analysis_config: Config, tmp_path: Path) -> None:
@@ -350,9 +394,10 @@ def test_failed_grounding_never_publishes_provisional_link(analysis_config: Conf
 
 def test_facts_alert_validation_and_once_per_issue(analysis_config: Config, tmp_path: Path) -> None:
     ev = sample_evidence()
-    alert = {'fact': '合成舊值', 'suspected_new_value': '合成新值', 'evidence_url': ev.source.url}
+    alert = {'fact': '合成舊值', 'suspected_new_value': '合成新值',
+             'evidence_url': ev.source.url, 'evidence_title': ev.source.title}
     data = {'alerts': [alert, {**alert, 'evidence_url': 'https://example.invalid'}, {'fact': '沒有證據'}]}
-    validate_fact_alerts(data, {ev.source.url})
+    validate_fact_alerts(data, {ev.source.url: ev.source.title})
     assert data['alerts'] == [alert]
     cna = CNAClient(tmp_path / 'research')
     retrieved = []
@@ -366,3 +411,73 @@ def test_facts_alert_validation_and_once_per_issue(analysis_config: Config, tmp_
     assert len(client.calls) == len(retrieved) == 1
     check_facts('2026.10.10', analysis_config, runner, cna, [])
     assert len(client.calls) == 2
+
+
+@pytest.mark.parametrize('change', [
+    {'evidence_url': 'https://www.cna.com.tw/news/aipl/202610020001.aspx'},
+    {'evidence_url': 'https://example.invalid', 'evidence_title': '合成友邦報導'},
+    {'evidence_url': 'https://www.cna.com.tw/news/aipl/202610030001.aspx'},
+    {'evidence_title': '另一則合成證據'},
+    {'evidence_title': '改寫後的合成友邦報導'},
+    {'evidence_title': ' 合成友邦報導'},
+    {'evidence_title': ''}, {'evidence_title': None},
+])
+def test_fact_alert_rejects_unknown_or_mismatched_evidence_pair(change):
+    ev = sample_evidence()
+    alert = {'fact': '合成舊值', 'suspected_new_value': '合成新值',
+             'evidence_url': ev.source.url, 'evidence_title': ev.source.title}
+    headlines = {ev.source.url: ev.source.title,
+                 'https://www.cna.com.tw/news/aipl/202610030001.aspx': '另一則合成證據',
+                 'https://example.invalid': ev.source.title}
+    data = {'alerts': [{**alert, **change}, {key: value for key, value in alert.items() if key != 'evidence_title'}]}
+    validate_fact_alerts(data, headlines)
+    assert data['alerts'] == []
+
+
+def test_facts_prompt_only_reports_completed_changes(analysis_config):
+    unit = facts_unit('2026.10.03', [sample_evidence()], analysis_config)
+    assert unit.prompt_bytes <= 90_000
+    assert '已經完成的變動' in unit.prompt
+    for phrase in ('已就職', '已辭職', '已斷交', '已三讀通過', '正式最終數據',
+                   '競選演說', '背書', '提名', '民調', '預測', '計畫', '當選後', '若當選'):
+        assert phrase in unit.prompt
+    assert '選舉結果僅能在投票日當天或之後認定' in unit.prompt
+    assert 'evidence_title 必須逐字等於該網址所附的 title' in unit.prompt
+
+
+def test_facts_cache_revalidates_headline_against_supplied_evidence(analysis_config, tmp_path):
+    from econ_digest.models import save_json
+    ev = sample_evidence()
+    alert = {'fact': '合成舊值', 'suspected_new_value': '合成新值',
+             'evidence_url': ev.source.url, 'evidence_title': ev.source.title}
+    cna = CNAClient(tmp_path / 'research')
+    cna.retrieve_search = lambda _: [ev]
+    runner = UnitRunner(FakeLLMClient(lambda *args: {'alerts': [alert]}), tmp_path / 'analysis')
+    assert check_facts('2026.10.03', analysis_config, runner, cna, []) == [alert]
+    path = runner.workdir / 'facts-check-2026.10.03.json'
+    saved = json.loads(path.read_text())
+    assert saved['headlines'] == {ev.source.url: ev.source.title}
+    saved['alerts'][0]['evidence_title'] = '改寫的合成標題'
+    save_json(path, saved)
+    cna.retrieve_search = lambda _: pytest.fail('warm facts check must use saved evidence')
+    assert check_facts('2026.10.03', analysis_config, runner, cna, []) == []
+
+
+def test_evidence_headline_is_preserved_through_digest_normalisation_and_cache(analysis_config, tmp_path, monkeypatch):
+    from econ_digest.analysis import pipeline
+    from econ_digest.models import Digest, load_json
+    ev = replace(sample_evidence(), source=replace(sample_evidence().source, title='合成報導："軟件"政策已三讀'))
+    alert = {'fact': '合成政策尚未通過', 'suspected_new_value': '2026-10-01 已三讀通過',
+             'evidence_url': ev.source.url, 'evidence_title': ev.source.title}
+    monkeypatch.setattr(pipeline.CNAClient, 'retrieve_search', lambda *args: [ev])
+    monkeypatch.setattr(pipeline.CNAClient, 'retrieve', lambda *args: [])
+    fake = FakeLLMClient(lambda prompt, model, stage: {'alerts': [alert]} if stage == 'facts'
+                         else answer(prompt, model, stage))
+    source = issue([article('a1')])
+    cache = tmp_path / 'analysis'
+    digest = pipeline.analyze_issue(source, analysis_config, fake, workdir=cache)
+    assert digest.fact_alerts[0]['evidence_title'] == ev.source.title
+    saved = load_json(analysis_config.paths.data_dir / 'issues' / 'te_2026.10.03' / 'digest.json', Digest)
+    assert saved.fact_alerts == digest.fact_alerts
+    warm = FakeLLMClient(lambda *args: pytest.fail('warm analysis must use the cache'))
+    assert pipeline.analyze_issue(source, analysis_config, warm, workdir=cache).fact_alerts == digest.fact_alerts

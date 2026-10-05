@@ -45,3 +45,14 @@ def test_sources_safe_url_dedup_and_e_tier_placement(sample_digest: Digest) -> N
     entry = next(item for item in entries(sample_digest) if item.article.id == 'sample-1')
     nodes = json.dumps(article_nodes(sample_digest, entry), ensure_ascii=False)
     assert '與台灣的關聯' in nodes and '對台灣的意涵' in nodes and '依據：' in nodes
+
+
+def test_legacy_alert_without_headline_still_renders(sample_digest: Digest, tmp_path: Path) -> None:
+    from econ_digest.commands.send import fact_alert_message
+    sample_digest.fact_alerts = [{'fact': '合成舊值', 'suspected_new_value': '合成新值',
+                                 'evidence_url': 'https://www.cna.com.tw/news/aipl/202610010001.aspx'}]
+    digest = Digest.from_dict(sample_digest.to_dict())
+    assert '中央社' in fact_alert_message(digest)
+    assert render_html(digest) and render_markdown(digest) and render_telegram(digest)
+    assert render_telegraph(digest)
+    assert build_site(digest, tmp_path).pages['taiwan'].is_file()

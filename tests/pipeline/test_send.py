@@ -179,12 +179,17 @@ def test_pages_only_rejected_in_messages_mode(delivery_config: Config, dry_run: 
     assert "telegram.delivery" in output
 
 
-def test_fact_alert_private_message_in_messages_mode(delivery_config, delivery_digest, prepared):
+@pytest.mark.parametrize('headline', [None, '合成證據標題 <script> & 政策'])
+def test_fact_alert_private_message_in_messages_mode(delivery_config, delivery_digest, prepared, headline):
     directory, client = prepared
     delivery_digest.fact_alerts = [{'fact': '合成舊值', 'suspected_new_value': '合成新值',
                                     'evidence_url': 'https://www.cna.com.tw/news/aipl/202610010001.aspx'}]
+    if headline is not None:
+        delivery_digest.fact_alerts[0]['evidence_title'] = headline
     save_json(directory / 'digest.json', delivery_digest)
     assert send.send_digest(delivery_config, log=lambda _: None) == 0
     assert len(client.messages) == 4
     assert client.messages[-1].startswith('⚠️ 台灣事實檔可能需要更新：')
     assert 'https://www.cna.com.tw/news/' in client.messages[-1] and '（請確認）' in client.messages[-1]
+    assert ('〈合成證據標題 &lt;script&gt; &amp; 政策〉' if headline else '中央社') in client.messages[-1]
+    assert '<script>' not in client.messages[-1]

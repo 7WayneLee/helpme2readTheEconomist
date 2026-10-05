@@ -73,8 +73,10 @@ def fact_alert_message(digest: Digest) -> str | None:
         return None
     lines = ["⚠️ 台灣事實檔可能需要更新："]
     for item in alerts:
+        headline = item.get("evidence_title")
+        label = f"〈{headline}〉" if isinstance(headline, str) and headline.strip() else "中央社"
         lines.append("• " + escape(item["fact"][:45]) + " → " + escape(item["suspected_new_value"][:70])
-                     + "（" + link(item["evidence_url"], "中央社") + "）")
+                     + "（" + link(item["evidence_url"], label) + "）")
     return "\n".join([*lines, "（請確認）"])
 
 

@@ -15,8 +15,41 @@ from econ_digest.analysis.validation import validate_summary
 from econ_digest.config import AnalysisConfig, Config
 from econ_digest.llm import FakeLLMClient
 from econ_digest.models import Digest, load_json
+from econ_digest.render.common import sections
+from econ_digest.render.telegraph import render_telegraph
+from econ_digest.site import build_site
 
 from conftest import answer, article, issue, payload, summary
+
+
+def test_every_focus_article_remains_level_zero_and_on_focus_pages(analysis_config, tmp_path):
+    source = issue([article(f'a{i}') for i in range(1, 4)])
+
+    def responder(prompt, model, stage):
+        data = answer(prompt, model, stage)
+        if stage == 'ground':
+            for proposed, item in enumerate(data['articles'], 1):
+                item.update(taiwan_level=proposed,
+                            taiwan_link={'text_zh': '合成政策改變台灣企業成本。', 'basis': ['article', 'facts']},
+                            taiwan_implications=[{'text_zh': '（推論）合成政策增加台灣企業成本。',
+                                                  'basis': ['article', 'facts']}])
+        return data
+
+    digest = analyze_issue(source, analysis_config, FakeLLMClient(responder), workdir=tmp_path / 'analysis')
+    assert len(digest.focus_ids) == 3
+    assert all(digest.classifications[identifier].taiwan_level == 0
+               and digest.classifications[identifier].taiwan_link is None
+               and digest.classifications[identifier].sources == []
+               and digest.classifications[identifier].tier == digest.summaries[identifier].tier == 'A'
+               for identifier in digest.focus_ids)
+    assert [entry.article.id for section in sections(digest) if section.anchor == 'focus'
+            for entry in section.entries] == digest.focus_ids
+    site = build_site(digest, tmp_path / 'site')
+    focus_html = site.pages['focus'].read_text()
+    telegraph_focus = json.dumps([page.nodes for page in render_telegraph(digest) if page.key.startswith('focus:')])
+    for story in source.articles:
+        assert story.title in focus_html and story.title in telegraph_focus
+        assert digest.summaries[story.id].taiwan_implications == ['（推論）合成政策增加台灣企業成本。']
 
 
 def classified(source, config):

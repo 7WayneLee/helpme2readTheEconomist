@@ -1,5 +1,6 @@
 檢視台灣事實檔哪些現況可能過時。以下僅有中央社搜尋結果的日期、標題與網址，excerpt 是搜尋標題，未擷取文章內文；只能提出標題直接支持的疑似變動，不能補寫細節或當成已完成查證。只提出比事實檔更新、直接矛盾或已改變的具體事實，不把新報導的日期當成現況改變，不把提案或預算編列當成已執行。沒有足夠新證據就回傳空清單，絕不自動改事實檔。
-每項 alert：fact（事實檔中的具體說法）、suspected_new_value（疑似新值及日期）、evidence_url（必須是下列中央社證據的網址）。每欄簡短正體中文。格式：{"alerts":[{"fact":"事實檔說法","suspected_new_value":"新證據可能顯示的變化","evidence_url":"https://www.cna.com.tw/news/aipl/202610010001.aspx"}]}
+只有證據明確報導已經完成的變動，才能判定事實過時，例如已就職、已辭職、已斷交、已三讀通過、已公布正式最終數據。競選演說、背書、提名、民調、預測、計畫，以及「當選後」「若當選」等條件句都不是已發生的變動，標題中出現「當選」也不等於選舉結果。選舉結果僅能在投票日當天或之後認定；2026 年地方選舉投票日為 2026-11-28，此前的競選喊話不可用來推定席次或職務已變動。證據時點或完成狀態不明就回傳空清單。
+每項 alert：fact（事實檔中的具體說法）、suspected_new_value（已完成的疑似新值及日期）、evidence_url、evidence_title。網址必須是下列證據之一，evidence_title 必須逐字等於該網址所附的 title，不得改寫或引用另一則標題。fact、suspected_new_value 用簡短正體中文，evidence_title 保留原標題。格式：{"alerts":[{"fact":"事實檔說法","suspected_new_value":"新證據顯示已完成的變化","evidence_url":"https://www.cna.com.tw/news/aipl/202610010001.aspx","evidence_title":"合成證據標題"}]}
 台灣事實檔：
 $facts
 中央社證據：$evidence
