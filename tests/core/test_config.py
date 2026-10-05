@@ -30,8 +30,8 @@ def test_defaults_and_frozen_tree(tmp_path: Path) -> None:
     assert config.english.level.startswith("全民英檢中級")
     assert config.telegram.message_delay_seconds == 1.1
     assert config.telegram.delivery == "telegraph"
-    assert config.telegram.send_report_file is True
-    assert config.telegram.cover_photo is True
+    assert config.telegram.send_report_file is False
+    assert config.telegram.cover_photo is False
     assert config.report.embed_images is True
     assert config.telegraph.author_name == "經濟學人導讀"
     assert config.telegraph.author_url == ""

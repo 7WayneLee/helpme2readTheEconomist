@@ -15,6 +15,8 @@ from .fetch import Fetcher, issue_directory, issue_url
 from .models import Digest, Issue, load_json, save_json
 from .logutil import redact
 from .render import write_outputs
+from .site import build_site
+from .site.backup import backup_output
 from .state import AlreadyRunning, State, load_state, run_lock, save_state, utc_now
 from .telegram import TelegramClient
 
@@ -86,6 +88,10 @@ def _run_locked(config: Config, issue_spec: str, *, no_send: bool, dry_run: bool
             paths = write_outputs(digest, directory, embed_images=config.report.embed_images)
             ready = config.secrets.telegram_bot_token and config.secrets.telegram_chat_id
             if no_send or dry_run or not config.telegram.enabled or not ready:
+                if not dry_run:
+                    build_site(digest, config.paths.output_dir, directory / f"TheEconomist.{date}.epub")
+                backup_output(config.paths.output_dir, config.backup, date, config.paths.data_dir,
+                              dry_run=dry_run, log=log)
                 log(f"報告已產生：{paths['html']}")
             elif _send(config, date, force=force, log=log) != 0:
                 raise RuntimeError("Telegram 傳送未完成")

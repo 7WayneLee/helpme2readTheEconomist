@@ -25,6 +25,7 @@ class ConfigError(ValueError):
 @dataclass(frozen=True)
 class PathsConfig:
     data_dir: Path = Path("data")
+    output_dir: Path = Path("output")
 
 
 @dataclass(frozen=True)
@@ -88,8 +89,9 @@ class EnglishConfig:
 @dataclass(frozen=True)
 class TelegramConfig:
     enabled: bool = True
-    send_report_file: bool = True
-    cover_photo: bool = True
+    send_report_file: bool = False
+    cover_photo: bool = False
+    original_text_messages: bool = False
     message_delay_seconds: float = 1.1
     delivery: str = "telegraph"
 
@@ -107,9 +109,28 @@ class ReportConfig:
 
 
 @dataclass(frozen=True)
+class SiteConfig:
+    enabled: bool = False
+    base_url: str = ""
+    ssh_host: str = ""
+    remote_dir: str = ""
+    ssh_timeout_seconds: int = 30
+
+
+@dataclass(frozen=True)
+class BackupConfig:
+    enabled: bool = False
+    remote: str = ""
+    branch: str = "main"
+    author_name: str = ""
+    author_email: str = ""
+
+
+@dataclass(frozen=True)
 class SecretsConfig:
     telegram_bot_token: str | None = field(default=None, repr=False)
     telegram_chat_id: str | None = field(default=None, repr=False)
+    telegram_channel_id: str | None = field(default=None, repr=False)
     github_token: str | None = field(default=None, repr=False)
     telegraph_access_token: str | None = field(default=None, repr=False)
 
@@ -125,6 +146,8 @@ class Config:
     telegram: TelegramConfig = field(default_factory=TelegramConfig)
     telegraph: TelegraphConfig = field(default_factory=TelegraphConfig)
     report: ReportConfig = field(default_factory=ReportConfig)
+    site: SiteConfig = field(default_factory=SiteConfig)
+    backup: BackupConfig = field(default_factory=BackupConfig)
     secrets: SecretsConfig = field(default_factory=SecretsConfig, repr=False)
 
 
@@ -143,7 +166,7 @@ def _convert(value: Any, annotation: Any, key: str, base_dir: Path) -> Any:
         path = Path(value).expanduser()
         return (base_dir / path).resolve()
     if annotation is str:
-        if not isinstance(value, str) or (not value.strip() and key != "telegraph.author_url"):
+        if not isinstance(value, str) or (not value.strip() and key not in {"telegraph.author_url", "site.base_url", "site.ssh_host", "site.remote_dir", "backup.remote", "backup.author_name", "backup.author_email"}):
             _fail(key, "必須是非空字串")
         return value
     if annotation is bool:
@@ -208,6 +231,21 @@ def _build(cls: type[T], data: dict[str, Any], prefix: str, base_dir: Path) -> T
 def _validate(config: Config) -> None:
     if config.analysis.focus_count <= 0:
         _fail("analysis.focus_count", "必須大於零")
+    if config.site.ssh_timeout_seconds <= 0:
+        _fail("site.ssh_timeout_seconds", "必須大於零")
+    if config.site.enabled:
+        from urllib.parse import urlsplit
+        parsed = urlsplit(config.site.base_url)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.username or parsed.query or parsed.fragment:
+            _fail("site.base_url", "必須是有效的 HTTP(S) 網址")
+        if not config.site.ssh_host.strip() or config.site.ssh_host.startswith("-"):
+            _fail("site.ssh_host", "必須是非空 SSH 主機")
+        if not config.site.remote_dir.startswith("/") or config.site.remote_dir == "/" or ".." in config.site.remote_dir.split("/"):
+            _fail("site.remote_dir", "必須是根目錄以外的絕對路徑")
+    if config.backup.enabled and not config.backup.remote.strip():
+        _fail("backup.remote", "啟用備份時必須設定遠端儲存庫")
+    if config.backup.branch.startswith("-") or not config.backup.branch.strip():
+        _fail("backup.branch", "分支名稱無效")
     for name in ("cover_companion_min", "leader_companion_min"):
         if getattr(config.tiers, name) not in TIER_ORDER:
             _fail(f"tiers.{name}", "必須是 A、B、C、D 或 E")
@@ -250,7 +288,7 @@ def _validate(config: Config) -> None:
 def _load_secrets() -> SecretsConfig:
     values = dict(os.environ)
     env_path = Path(values.get("ECON_DIGEST_ENV_FILE", "~/.config/econ-digest/env")).expanduser()
-    names = {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN", "TELEGRAPH_ACCESS_TOKEN"}
+    names = {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN", "TELEGRAPH_ACCESS_TOKEN", "TELEGRAM_CHANNEL_ID"}
     try:
         mode = env_path.stat().st_mode
     except FileNotFoundError:
@@ -281,6 +319,7 @@ def _load_secrets() -> SecretsConfig:
     return SecretsConfig(
         telegram_bot_token=values.get("TELEGRAM_BOT_TOKEN") or None,
         telegram_chat_id=values.get("TELEGRAM_CHAT_ID") or None,
+        telegram_channel_id=values.get("TELEGRAM_CHANNEL_ID") or None,
         github_token=values.get("GITHUB_TOKEN") or None,
         telegraph_access_token=values.get("TELEGRAPH_ACCESS_TOKEN") or None,
     )
@@ -309,5 +348,5 @@ def load_config(path: str | Path | None = None) -> Config:
         paths=config.paths, source=config.source, llm=config.llm, tiers=config.tiers,
         analysis=config.analysis,
         english=config.english, telegram=config.telegram, telegraph=config.telegraph, report=config.report,
-        secrets=_load_secrets(),
+        site=config.site, backup=config.backup, secrets=_load_secrets(),
     )

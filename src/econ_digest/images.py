@@ -10,6 +10,8 @@ import posixpath
 from urllib.parse import unquote, urlsplit
 from zipfile import ZipFile
 
+from .epub_parser import _Document, _parse_article, article_paragraph_nodes
+
 
 @dataclass(frozen=True)
 class ImageBlob:
@@ -18,10 +20,22 @@ class ImageBlob:
     data: bytes
 
 
+@dataclass(frozen=True)
+class PositionedImage:
+    image: ImageBlob
+    before_paragraph: int
+
+
+@dataclass
+class ArticleImages:
+    head: ImageBlob | None = None
+    inline: list[PositionedImage] = field(default_factory=list)
+
+
 @dataclass
 class IssueImages:
     cover: ImageBlob | None = None
-    by_article: dict[str, list[ImageBlob]] = field(default_factory=dict)
+    by_article: dict[str, ArticleImages] = field(default_factory=dict)
 
 
 class _Tags(HTMLParser):
@@ -84,17 +98,31 @@ def load_issue_images(epub_path: str | Path) -> IssueImages:
             if html_path not in names or not (item.get("media-type") in {"application/xhtml+xml", "text/html"}
                                              or PurePosixPath(html_path).suffix in {".html", ".xhtml", ".htm"}):
                 continue
-            refs = [attrs for tag, attrs in _Tags(archive.read(html_path)).tags if tag == "img"]
-            refs.sort(key=lambda attrs: "te_head_image" not in attrs.get("class", "").split())
+            html = archive.read(html_path).decode("utf-8-sig", errors="replace")
+            article = _parse_article(html, html_path, 0, "")
+            if article is None:
+                continue
+            nodes = list(_Document(html).root.walk())
+            title_node = next(n for n in nodes if n.tag == "h1" and n.has_class("te_article_title"))
+            date_node = next((n for n in nodes if n.has_class("te_article_datePublished")), None)
+            paragraphs = article_paragraph_nodes(nodes, (date_node or title_node).position, article.kind)
+            refs = [n for n in nodes if n.tag == "img" and (n.has_class("te_head_image") or n.position > (date_node or title_node).position)]
+            # Prefer designated head references before deduplicating reused files.
+            refs.sort(key=lambda n: not n.has_class("te_head_image"))
             seen: set[str] = set()
-            blobs = []
-            for attrs in refs:
-                path = _resolve(html_path, attrs.get("src", ""))
+            selected = ArticleImages()
+            for ref in refs:
+                path = _resolve(html_path, ref.attrs.get("src", ""))
                 if path in seen:
                     continue
                 if (blob := image(path)) is not None:
                     seen.add(blob.name)
-                    blobs.append(blob)
-            if blobs:
-                result.by_article[PurePosixPath(html_path).stem] = blobs
+                    if ref.has_class("te_head_image") and selected.head is None:
+                        selected.head = blob
+                    else:
+                        position = sum(n.position < ref.position for n in paragraphs)
+                        selected.inline.append(PositionedImage(blob, position))
+            selected.inline.sort(key=lambda item: item.before_paragraph)
+            if selected.head or selected.inline:
+                result.by_article[PurePosixPath(html_path).stem] = selected
     return result

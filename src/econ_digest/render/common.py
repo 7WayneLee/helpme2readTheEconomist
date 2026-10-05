@@ -54,12 +54,18 @@ def entries(digest: Digest) -> list[Entry]:
 
 def sections(digest: Digest) -> list[Section]:
     selected = entries(digest)
-    result = [Section(f"taiwan-{level}", f"{'一二三'[level - 1]}、{label}", [
-        item for item in selected if item.classification.taiwan_level == level
-    ]) for level, label in TAIWAN_LEVELS.items()]
+    focus_ids = getattr(digest, "focus_ids", None) or []
+    result = [Section(f"taiwan-{level}", label, items)
+              for level, label in TAIWAN_LEVELS.items()
+              if (items := [item for item in selected if item.classification.taiwan_level == level])]
+    focused = {item.article.id: item for item in selected if item.classification.taiwan_level == 0}
+    focus = [focused[identifier] for identifier in focus_ids if identifier in focused]
+    if focus:
+        result.append(Section("focus", "本週焦點", focus))
     result.extend(Section(category.replace(".", "-"), CATEGORY_SHORT_LABELS[category], items)
                   for category in CATEGORIES
                   if (items := [item for item in selected if item.classification.taiwan_level == 0
+                                and item.article.id not in focus_ids
                                 and item.classification.category == category]))
     return result
 
@@ -84,7 +90,7 @@ def word_count_label(count: int) -> str:
 
 def metadata(entry: Entry) -> str:
     article = entry.article
-    tags = {"leader": "社論", "column": "專欄", "briefing": "特別報導"}
+    tags = {"leader": "經濟學人立場", "column": "專欄", "briefing": "特別報導"}
     parts = [article.section]
     if article.fly_title:
         parts.append(article.fly_title)
@@ -93,7 +99,11 @@ def metadata(entry: Entry) -> str:
         parts.append(tags[article.kind])
     if article.is_cover:
         parts.append("封面故事")
-    return " · ".join(parts)
+    return clean_text(" · ".join(parts))
+
+
+def clean_text(value: str) -> str:
+    return value.replace("社論主張：", "作者主張：").replace("社論", "作者")
 
 
 def summary_fields(summary: ArticleSummary, *, headline: bool = True) -> list[tuple[str, list[str]]]:
@@ -117,7 +127,7 @@ def summary_fields(summary: ArticleSummary, *, headline: bool = True) -> list[tu
                          ("重點", summary.key_points), ("摘要", summary.summary_zh)):
         if value:
             fields.append((label, value if isinstance(value, list) else [value]))
-    return fields
+    return [(label, [clean_text(value) for value in values]) for label, values in fields]
 
 
 def merged_leader_titles(digest: Digest, entry: Entry) -> list[str]:

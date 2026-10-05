@@ -42,17 +42,17 @@ def test_markdown_sections_and_complete_fields(sample_digest: Digest) -> None:
     report = render_markdown(sample_digest)
     assert report.startswith("# 經濟學人導讀｜2026 年 10 月 3 日號")
     assert "2026-10-04 10:30（台北時間）" in report
-    expected = ["## 本週要聞速覽", "## 台灣", "### 一、台灣本身", "### 二、台灣與國際", "### 三、間接相關",
-                *["## " + label for label in CATEGORY_SHORT_LABELS.values()], "## 英文學習選文", "## 附錄"]
+    expected = ["## 本週要聞速覽", "## 台灣", "### 台灣本身", "### 台灣與國際", "### 間接相關",
+                *["## " + label for label in CATEGORY_SHORT_LABELS.values()], "## 英文學習選文"]
     assert [report.index(value) for value in expected] == sorted(report.index(value) for value in expected)
     for field in ("一句話重點", "背景", "文章脈絡", "論證", "主張", "證據", "反方觀點", "結論", "關鍵數據", "重要引述",
                   "經濟學人的立場與盲點", "對台灣的意涵", "延伸思考", "重點", "摘要", "與台灣的關聯",
-                  "📰 經濟學人社論立場", "選文理由", "背景導讀", "生詞表", "實用片語", "長難句解析", "寫作手法", "閱讀理解", "原文全文"):
+                  "經濟學人立場", "選文理由", "背景導讀", "生詞表", "實用片語", "長難句解析", "寫作手法", "閱讀理解", "原文全文"):
         assert field in report
     assert "A synthetic cover argument" in report
-    assert "社論主張持續合作。" in report
+    assert "作者主張持續合作。" in report
     assert "[1] A synthetic &lt;script&gt;" in report
-    assert "Token：350" in report and "synthetic-other" in report
+    assert "Token：350" not in report and "synthetic-other" not in report
     assert "<script>" not in report
     assert "&amp;" in report
 
@@ -60,10 +60,10 @@ def test_markdown_sections_and_complete_fields(sample_digest: Digest) -> None:
 def test_empty_t1_and_no_taiwan(sample_digest: Digest, no_taiwan_digest: Digest) -> None:
     sample_digest.classifications["sample-1"].taiwan_level = 0
     report = render_markdown(sample_digest)
-    assert "### 一、台灣本身\n\n本期沒有這類文章。" in report
+    assert "### 台灣本身" not in report
     for render in (render_markdown, render_html):
-        assert render(no_taiwan_digest).count("本期沒有這類文章。") == 3
-    assert "本期沒有台灣相關文章。" in "\n".join(render_telegram(no_taiwan_digest))
+        assert "本期沒有這類文章。" not in render(no_taiwan_digest)
+    assert "本期沒有台灣相關文章。" not in "\n".join(render_telegram(no_taiwan_digest))
 
 
 @pytest.mark.parametrize("no_taiwan", [False, True])
@@ -100,13 +100,13 @@ def test_telegram_order_limits_and_quiz_answers(sample_digest: Digest) -> None:
     all_text = "\n".join(messages)
     assert messages[0].startswith("📰 <b>經濟學人導讀")
     assert messages[0].index("台灣相關政治要聞") < messages[0].index("非台灣政治要聞")
-    expected = ["<b>T1 ·", "<b>T2 ·", "三、間接相關", "<b>美國</b>", "<b>中國</b>", "<b>亞太</b>", "<b>歐洲</b>",
+    expected = ["<b>T1 ·", "<b>T2 ·", "間接相關", "<b>美國</b>", "<b>中國</b>", "<b>亞太</b>", "<b>歐洲</b>",
                 "<b>其他地區</b>", "<b>財經商業</b>", "<b>科技</b>", "<b>科學</b>", "<b>文化生活</b>"]
     positions = [all_text.index(value) for value in expected]
     assert positions == sorted(positions)
     assert '<blockquote expandable><b>答案（點開）</b>\n1. Synthetic quiz answer: costs remain.</blockquote>' in all_text
     assert "&lt;script&gt;" in all_text and "<script>" not in all_text
-    assert "社論主張持續合作。" in all_text and "A synthetic cover argument" in all_text
+    assert "作者主張持續合作。" in all_text and "A synthetic cover argument" in all_text
 
 
 @pytest.mark.parametrize("limit", [4000, 500, 200])
@@ -212,7 +212,7 @@ def test_toc_uses_wrapped_chips_and_groups_taiwan(sample_digest: Digest) -> None
     assert '<div class="toc-chips">' in nav and '<ul>' not in nav
     assert '<span class="toc-group"><a href="#taiwan">台灣</a><a href="#taiwan-1">T1</a><a href="#taiwan-2">T2</a><a href="#taiwan-3">T3</a></span>' in nav
     assert "display:flex;flex-wrap:wrap" in html
-    for anchor in ("brief", "taiwan-1", "taiwan-2", "taiwan-3", "intl-europe", "english", "appendix"):
+    for anchor in ("brief", "taiwan-1", "taiwan-2", "taiwan-3", "intl-europe", "english"):
         assert f'href="#{anchor}"' in nav
 
 
@@ -244,7 +244,7 @@ def test_category_and_taiwan_continuations_are_applied_by_renderer(sample_digest
             digest.summaries[added_id] = replace(digest.summaries[identifier], article_id=added_id)
     messages = render_telegram(digest, 500)
     assert any(message.startswith("<b>歐洲（續）</b>") for message in messages)
-    assert any(message.startswith("<b>台灣 T3（續）</b>") for message in messages)
+    assert any(message.startswith("<b>間接相關（續）</b>") for message in messages)
     assert any(message.startswith("<b>英文學習選文（續）</b>") for message in messages)
     for message in messages:
         check_html(message)
