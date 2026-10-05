@@ -1,4 +1,5 @@
 import threading
+import logging
 import time
 from typing import Any
 
@@ -14,6 +15,17 @@ def test_fake_returns_dict_and_records_calls() -> None:
     assert client.calls == [("request", "primary", "summaries")]
     assert result.total_tokens == 0
     assert result.duration_seconds >= 0
+
+
+def test_debug_prompt_stays_on_one_log_line(caplog: pytest.LogCaptureFixture) -> None:
+    prompt = "First line\nSecond line\r\nThird line"
+    client = FakeLLMClient(lambda *args: {"ok": True})
+    with caplog.at_level(logging.DEBUG):
+        client.generate_json(prompt, models=["primary"], stage="classify")
+    record = next(record for record in caplog.records if "prompt=" in record.message)
+    assert "\n" not in record.message and "\r" not in record.message
+    assert "First line Second line  Third line" in record.message
+    assert client.calls[0][0] == prompt
 
 
 def test_fake_uses_the_same_repair_and_fallback_policy() -> None:

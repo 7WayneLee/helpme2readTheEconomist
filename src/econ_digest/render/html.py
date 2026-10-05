@@ -49,13 +49,18 @@ def english_html(digest: Digest) -> str:
     result += "<h3>選文理由</h3>" + paragraph(pick.reason_zh)
     result += paragraph(f"CEFR：{pick.cefr} · 字數：{word_count_label(pick.word_count)} · 預估閱讀時間：{pick.reading_minutes} 分鐘")
     result += "<h3>背景導讀</h3>" + paragraph(pick.pre_reading_zh)
-    result += '<h3>生詞表</h3><div class="table-scroll"><table><thead><tr>' + "".join(f"<th>{v}</th>" for v in ("word", "詞性", "中文", "原文例句", "補充")) + "</tr></thead><tbody>"
+    result += '<h3>生詞表</h3><div class="study-cards">'
     for item in pick.vocabulary:
-        result += "<tr>" + "".join(f"<td>{escape(v)}</td>" for v in (item.word, item.pos, item.meaning_zh, item.example_en, item.note_zh or "")) + "</tr>"
-    result += "</tbody></table></div><h3>實用片語</h3>"
+        result += '<article class="study-card"><p class="study-term">' + f'<strong lang="en">{escape(item.word)}</strong> <span lang="en">{escape(item.pos)}</span> <span>{escape(item.meaning_zh)}</span></p>'
+        result += f'<p class="study-example" lang="en"><i>{escape(item.example_en)}</i></p>'
+        if item.note_zh:
+            result += paragraph("補充：" + item.note_zh)
+        result += "</article>"
+    result += '</div><h3>實用片語</h3><div class="study-cards">'
     for item in pick.phrases:
-        result += f"<h4>{escape(item.phrase)}</h4>" + paragraph(item.meaning_zh) + paragraph(item.example_en)
-    result += "<h3>長難句解析</h3>"
+        result += '<article class="study-card"><p class="study-term">' + f'<strong lang="en">{escape(item.phrase)}</strong> <span>{escape(item.meaning_zh)}</span></p>'
+        result += f'<p class="study-example" lang="en"><i>{escape(item.example_en)}</i></p></article>'
+    result += "</div><h3>長難句解析</h3>"
     for item in pick.sentences:
         result += "<blockquote>" + escape(item.sentence_en) + "</blockquote>" + paragraph(item.breakdown_zh) + paragraph("中譯：" + item.translation_zh)
     result += "<h3>寫作手法</h3>" + bullets(pick.writing_notes_zh) + "<h3>閱讀理解</h3>"
@@ -69,9 +74,13 @@ def english_html(digest: Digest) -> str:
 
 def render_html(digest: Digest) -> str:
     groups = sections(digest)
-    toc = [("brief", "本週要聞速覽"), ("taiwan", "台灣"), *[(s.anchor, s.title) for s in groups], ("english", "英文學習選文"), ("appendix", "附錄")]
+    toc = [("brief", "本週要聞速覽"), *[(s.anchor, s.title) for s in groups[3:]], ("english", "英文學習選文"), ("appendix", "附錄")]
     body = f"<header><h1>{escape(title(digest))}</h1>" + paragraph("產生時間：" + generation_time(digest)) + paragraph(overview(digest)) + "</header>"
-    body += '<nav aria-label="目錄"><h2>目錄</h2><ul>' + "".join(f'<li><a href="#{anchor}">{escape(label)}</a></li>' for anchor, label in toc) + "</ul></nav>"
+    chips = [f'<a class="toc-chip" href="#{anchor}">{escape(label)}</a>' for anchor, label in toc]
+    taiwan = '<span class="toc-group"><a href="#taiwan">台灣</a>' + "".join(
+        f'<a href="#{section.anchor}">T{index}</a>' for index, section in enumerate(groups[:3], 1)) + '</span>'
+    chips.insert(1, taiwan)
+    body += '<nav aria-label="目錄"><h2>目錄</h2><div class="toc-chips">' + "".join(chips) + '</div></nav>'
     body += '<section id="brief"><h2>本週要聞速覽</h2>'
     for label, items in (("政治", digest.week_brief.politics if digest.week_brief else []), ("商業", digest.week_brief.business if digest.week_brief else [])):
         body += f"<h3>{label}</h3>" + bullets([("🇹🇼 " if item.taiwan_related else "") + item.text_zh for item in items])

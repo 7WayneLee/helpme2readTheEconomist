@@ -1,4 +1,4 @@
-"""Validated, normalised successes only; failed units remain retryable."""
+"""Cache validated raw successes so normaliser changes need no new LLM calls."""
 
 from __future__ import annotations
 
@@ -11,10 +11,11 @@ from typing import Any
 
 from ..llm import LLMClient, LLMError
 from ..models import LLMCallStat, save_json
-from ..zhtw import DEFAULT_SKIP_KEYS, normalize_tree
+from ..zhtw import DEFAULT_SKIP_KEYS
 from .prompts import Unit
 
 SKIP_KEYS = DEFAULT_SKIP_KEYS | {"id", "question", "section", "kind", "title", "source_url", "issue_date"}
+CACHE_FORMAT_VERSION = 2
 
 
 @dataclass
@@ -32,14 +33,15 @@ def cache_path(workdir: Path, unit: Unit) -> Path:
 def read_cache(workdir: Path, unit: Unit) -> UnitResult | None:
     try:
         envelope = json.loads(cache_path(workdir, unit).read_text(encoding="utf-8"))
-        if not isinstance(envelope, dict) or envelope.get("key") != unit.cache_key:
+        if (not isinstance(envelope, dict) or envelope.get("key") != unit.cache_key
+                or envelope.get("format_version") != CACHE_FORMAT_VERSION):
             return None
         data = envelope.get("data")
         model = envelope.get("model")
         if not isinstance(data, dict) or not isinstance(model, str) or model not in unit.models:
             return None
         unit.validate(data)
-        return UnitResult(unit, normalize_tree(data, skip_keys=SKIP_KEYS), model)
+        return UnitResult(unit, data, model)
     except (OSError, UnicodeError, ValueError, TypeError, KeyError):
         return None
 
@@ -67,8 +69,9 @@ class UnitRunner:
             result = self.llm.generate_json(unit.prompt, models=unit.models, stage=unit.stage, validate=unit.validate)
             # Also enforce the contract for third-party implementations of LLMClient.
             unit.validate(result.data)
-            data = normalize_tree(result.data, skip_keys=SKIP_KEYS)
-            save_json(cache_path(self.workdir, unit), {"key": unit.cache_key, "data": data, "model": result.model})
+            data = result.data
+            save_json(cache_path(self.workdir, unit), {"format_version": CACHE_FORMAT_VERSION,
+                                                     "key": unit.cache_key, "data": data, "model": result.model})
         except (LLMError, ValueError) as exc:
             attempts = exc.attempts if isinstance(exc, LLMError) else []
             model = str(attempts[-1].get("model", unit.models[-1])) if attempts else unit.models[-1]

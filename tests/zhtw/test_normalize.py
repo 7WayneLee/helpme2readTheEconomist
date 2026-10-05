@@ -45,8 +45,8 @@ def test_english_text_is_preserved() -> None:
 
 
 @pytest.mark.usefixtures("no_opencc")
-def test_tai_character_is_always_corrected() -> None:
-    assert normalize_zh_tw("臺灣、臺北、平臺、舞臺、臺積電") == "台灣、台北、平台、舞台、台積電"
+def test_traditional_tai_character_is_preserved_except_glossary() -> None:
+    assert normalize_zh_tw("臺灣、臺北、平臺、舞臺、臺積電") == "臺灣、臺北、平臺、舞臺、台積電"
 
 
 @pytest.mark.usefixtures("no_opencc")
@@ -125,7 +125,7 @@ def test_tree_batches_opencc_once(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result == {"title": "中國台灣", "entries": ["影片\n多行", "軟體", ""], "en": "SKIPPED中国"}
 
 
-def test_broken_separator_falls_back_to_individual_strings(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_broken_separator_preserves_original_runs_with_one_call(monkeypatch: pytest.MonkeyPatch) -> None:
     inputs: list[str] = []
     monkeypatch.setattr(normalizer.shutil, "which", lambda executable: "opencc")
 
@@ -135,8 +135,8 @@ def test_broken_separator_falls_back_to_individual_strings(monkeypatch: pytest.M
         return subprocess.CompletedProcess(args, 0, stdout=converted)
 
     monkeypatch.setattr(normalizer.subprocess, "run", convert)
-    assert normalize_tree(["中国", "国際"]) == ["中國", "國際"]
-    assert len(inputs) == 3
+    assert normalize_tree(["中国", "国際"]) == ["中国", "国際"]
+    assert len(inputs) == 1
 
 
 def test_empty_tree_makes_no_subprocess_call(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -150,7 +150,7 @@ def test_empty_tree_makes_no_subprocess_call(monkeypatch: pytest.MonkeyPatch) ->
 @pytest.mark.usefixtures("no_opencc")
 def test_missing_opencc_warns_once_and_still_applies_glossary(caplog: pytest.LogCaptureFixture) -> None:
     with caplog.at_level(logging.WARNING):
-        assert normalize_tree(["軟件", "視頻"]) == ["軟體", "影片"]
+        assert normalize_tree(["軟件说", "視頻"]) == ["軟體说", "影片"]
         assert normalize_zh_tw("特朗普") == "川普"
     assert len([record for record in caplog.records if "OpenCC conversion skipped" in record.message]) == 1
 
@@ -165,7 +165,7 @@ def test_opencc_failures_are_graceful(monkeypatch: pytest.MonkeyPatch, caplog: p
 
     monkeypatch.setattr(normalizer.subprocess, "run", fail)
     with caplog.at_level(logging.WARNING):
-        assert normalize_tree(["視頻", "軟件"]) == ["影片", "軟體"]
+        assert normalize_tree(["視頻说", "軟件"]) == ["影片说", "軟體"]
     assert len(caplog.records) == 1
 
 
@@ -191,7 +191,7 @@ def test_lint_glossary_terms_and_simplified_characters() -> None:
     assert any("簡體字" in warning and "说" in warning and "题" in warning for warning in warnings)
     assert lint_zh_tw("台灣的晶片、網路與軟體演算法。") == []
     assert lint_zh_tw("English software, Trump and Taiwan.") == []
-    assert len(normalizer._SIMPLIFIED_ONLY) >= 200
+    assert lint_zh_tw("里干范托后台面系制准云只才斗于") == []
 
 
 @pytest.mark.usefixtures("no_opencc")
@@ -205,3 +205,55 @@ def test_glossary_integrity_and_idempotence() -> None:
     for source, target, _ in rows:
         assert normalize_zh_tw(source) == target, source
         assert normalize_zh_tw(target) == target, target
+
+
+@pytest.mark.parametrize("text", ["曼蘇里", "魯托", "范德賴恩", "干預", "于坦",
+                                  "臺灣的企業採取措施，保護供應鏈。",
+                                  'The firms met in Alaska. "Policy" matters.'])
+def test_correct_traditional_and_english_skip_opencc(text: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    def forbidden(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("Correct Traditional and English must bypass OpenCC")
+
+    monkeypatch.setattr(normalizer.subprocess, "run", forbidden)
+    assert normalize_zh_tw(text).encode("utf-8") == text.encode("utf-8")
+
+
+@pytest.mark.skipif(shutil.which("opencc") is None, reason="OpenCC CLI is not installed")
+@pytest.mark.parametrize("source,target", [
+    ("特朗普和普京在阿拉斯加会面", "川普和普丁在阿拉斯加會面"),
+    ("他說这个計畫很复杂", "他說這個計畫很複雜"),
+])
+def test_simplified_run_converts_all_neighbours(source: str, target: str) -> None:
+    assert normalize_zh_tw(source) == target
+
+
+def test_cjk_runs_end_at_punctuation_whitespace_latin_and_digits(monkeypatch: pytest.MonkeyPatch) -> None:
+    inputs: list[str] = []
+    monkeypatch.setattr(normalizer.shutil, "which", lambda _: "opencc")
+
+    def convert(args: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        inputs.append(kwargs["input"])
+        return subprocess.CompletedProcess(args, 0, stdout=kwargs["input"].replace("国", "國").replace("臺", "台").replace("干", "幹"))
+
+    monkeypatch.setattr(normalizer.subprocess, "run", convert)
+    source = "干預，国臺 灣国X国2国；曼蘇里、魯托、范德賴恩、于坦、臺灣"
+    assert normalize_tree([source, "国"]) == [
+        "干預，國台 灣國X國2國；曼蘇里、魯托、范德賴恩、于坦、臺灣", "國"]
+    assert len(inputs) == 1
+    assert all(text not in inputs[0] for text in ("干預", "曼蘇里", "魯托", "范德賴恩", "于坦", "臺灣"))
+
+
+def test_cp950_detector_and_lint_cover_requested_characters() -> None:
+    flagged = "们这说时为国会对发经过还进现间东车长书买卖门问题让认识语读谁调资质报纸边产业务决议选举头历钟汇获团战总统热线军队冲苏"
+    assert all(normalizer._is_simplified(character) for character in flagged)
+    assert not any(normalizer._is_simplified(character) for character in "里干范托后台面系制准云只才斗于臺灣蘇魯")
+    for character in ("\u3400", "\uf900", "\U00020000", "\U0002fa1f"):
+        assert normalizer._is_simplified(character)
+        assert any(character in warning for warning in lint_zh_tw(character))
+    assert not normalizer._is_simplified("😀")
+
+
+@pytest.mark.usefixtures("no_opencc")
+def test_unambiguous_hou_compounds_and_milei() -> None:
+    assert normalize_zh_tw("以后、然后、之后、后来、最后、前后、背后、落后、后果；米雷伊") == (
+        "以後、然後、之後、後來、最後、前後、背後、落後、後果；米雷")

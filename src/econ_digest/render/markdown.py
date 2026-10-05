@@ -14,10 +14,6 @@ def text(value: str) -> str:
     return escape(value, quote=False).replace("\\", "\\\\").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]").replace("`", "\\`")
 
 
-def table_cell(value: str) -> str:
-    return text(value).replace("|", "\\|").replace("\n", "<br>")
-
-
 def article_lines(digest: Digest, entry: Entry) -> list[str]:
     level = f" · T{entry.classification.taiwan_level}" if entry.classification.taiwan_level else ""
     result = [f"### {text(entry.classification.title_zh)}", "", f"*{text(entry.article.title)}*", "",
@@ -43,13 +39,16 @@ def english_lines(digest: Digest) -> list[str]:
     lines = [f"### {text(article.title)}", "", text(classification.title_zh if classification else article.title), "",
              f"**選文理由**：{text(pick.reason_zh)}", "",
              f"CEFR：{text(pick.cefr)} · 字數：{word_count_label(pick.word_count)} · 預估閱讀時間：{pick.reading_minutes} 分鐘", "",
-             "### 背景導讀", "", text(pick.pre_reading_zh), "", "### 生詞表", "",
-             "| word | 詞性 | 中文 | 原文例句 | 補充 |", "| --- | --- | --- | --- | --- |"]
-    lines.extend("| " + " | ".join(table_cell(v) for v in (item.word, item.pos, item.meaning_zh, item.example_en, item.note_zh or "")) + " |"
-                 for item in pick.vocabulary)
+             "### 背景導讀", "", text(pick.pre_reading_zh), "", "### 生詞表", ""]
+    for item in pick.vocabulary:
+        lines.extend([f"**{text(item.word)}** · {text(item.pos)} · {text(item.meaning_zh)}", "",
+                      f"*{text(item.example_en)}*", ""])
+        if item.note_zh:
+            lines.extend(["補充：" + text(item.note_zh), ""])
+        lines.extend(["---", ""])
     lines.extend(["", "### 實用片語", ""])
     for item in pick.phrases:
-        lines.extend([f"- **{text(item.phrase)}**：{text(item.meaning_zh)}", f"  - {text(item.example_en)}"])
+        lines.extend([f"**{text(item.phrase)}** · {text(item.meaning_zh)}", "", f"*{text(item.example_en)}*", "", "---", ""])
     lines.extend(["", "### 長難句解析", ""])
     for item in pick.sentences:
         lines.extend([f"> {text(item.sentence_en)}", "", text(item.breakdown_zh), "", f"中譯：{text(item.translation_zh)}", ""])

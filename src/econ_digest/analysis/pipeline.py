@@ -14,7 +14,7 @@ from ..fetch import issue_directory
 from ..llm import GwgClient, LLMClient, run_parallel
 from ..models import ArticleSummary, Classification, Digest, EnglishPick, Issue, WeekBrief, save_json
 from ..signals import find_taiwan_signals
-from ..zhtw import lint_zh_tw
+from ..zhtw import lint_zh_tw, normalize_tree
 from .brief import brief_unit
 from .cache import SKIP_KEYS, UnitResult, UnitRunner
 from .classification import apply_tiers, classify_units, fallback_classification, fixed_classification, pair_unit
@@ -155,6 +155,8 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
         warnings.append("本次僅執行指定範圍的摘要，供提示詞調整使用。")
     digest = Digest(issue.issue_date, datetime.now(timezone.utc).isoformat(), issue, classifications, summaries,
                     week_brief, english, sorted(runner.stats, key=lambda stat: (stat.stage, stat.model)), warnings)
+    # Source articles and diagnostic strings are not model-authored Chinese.
+    digest = Digest.from_dict(normalize_tree(digest.to_dict(), skip_keys=SKIP_KEYS | {"issue", "warnings", "llm_calls"}))
     findings = [finding for value in _zh_strings(digest.to_dict()) for finding in lint_zh_tw(value)]
     digest.warnings = list(dict.fromkeys([*warnings, *findings]))
     output = issue_directory(config, issue.issue_date) / ("digest-tuning.json" if only_tier is not None or limit is not None else "digest.json")

@@ -93,3 +93,49 @@ def test_guide_quiz_cites_valid_paragraph(analysis_config: Config) -> None:
     data["quiz"][0]["answer"] = "第 99 段是答案。"
     with pytest.raises(ValueError, match="valid paragraph"):
         validate_guide(data, article("a1"), analysis_config.english)
+
+
+@pytest.mark.parametrize("lemma,form,pos,note", [
+    ("shun", "shunned", "v.", "原文為過去式 shunned"),
+    ("collide", "collided", "v.", "原文為過去式 collided"),
+    ("ShUn", "SHUNNED", "v.", "原文為過去式 SHUNNED"),
+    ("policy", "policies", "n.", "原文為複數 policies"),
+    ("study", "studied", "v.", "原文為過去式 studied"),
+    ("rise", "rising", "v.", "原文為現在分詞 rising"),
+    ("go", "went", "v.", "原文為過去式 went"),
+    ("take", "taken", "v.", "過去分詞 taken"),
+    ("shun", "shunned", "v.", "常見於外交議題。"),
+    ("collide", "collided", "v.", "常見於外交議題。"),
+])
+def test_guide_accepts_lemma_with_article_inflection(analysis_config: Config, lemma: str,
+                                                   form: str, pos: str, note: str) -> None:
+    data = guide()
+    example = f"The article uses {form} here."
+    source = article("a1")
+    source.paragraphs.append(example)
+    data["vocabulary"][0].update(word=lemma, pos=pos, example_en=example, note_zh=note)
+    validate_guide(data, source, analysis_config.english)
+
+
+@pytest.mark.parametrize("lemma,form,note", [("go", "went", "常見搭配。"),
+                                            ("shun", "unshunned", "常見搭配。"),
+                                            ("collide", "planning", "搭配 planning。")])
+def test_guide_rejects_unrelated_or_undocumented_forms(analysis_config: Config, lemma: str,
+                                                     form: str, note: str) -> None:
+    data = guide()
+    example = f"The article uses {form} here."
+    source = article("a1")
+    source.paragraphs.append(example)
+    data["vocabulary"][0].update(word=lemma, pos="v.", example_en=example, note_zh=note)
+    with pytest.raises(ValueError, match="must contain"):
+        validate_guide(data, source, analysis_config.english)
+
+
+def test_lemma_does_not_relax_verbatim_example_check(analysis_config: Config) -> None:
+    data = guide()
+    source = article("a1")
+    source.paragraphs.append("The firms shunned the proposal.")
+    data["vocabulary"][0].update(word="shun", pos="v.", example_en="The firms shun the proposal.",
+                                  note_zh="原文為過去式 shunned")
+    with pytest.raises(ValueError, match="verbatim"):
+        validate_guide(data, source, analysis_config.english)

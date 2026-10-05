@@ -11,7 +11,7 @@ import pytest
 
 from econ_digest.models import BriefItem, Digest
 from econ_digest.render import render_html, render_markdown, render_telegram, write_outputs
-from econ_digest.render.telegram import overview_html
+from econ_digest.render.telegram import overview_html, section_messages
 from econ_digest.taxonomy import CATEGORY_SHORT_LABELS, TIERS
 from econ_digest.telegram.format import check_html, utf16_len
 
@@ -191,3 +191,61 @@ def test_word_counts_explicitly_describe_english(sample_digest: Digest,
     assert report.count("英文 958 字") == 2
     assert "字數：英文 958 字" in report
     assert re.search(r"(?<!英文 )958 字", report) is None
+
+
+def test_study_cards_keep_terms_examples_and_notes_together(sample_digest: Digest) -> None:
+    html = render_html(sample_digest)
+    markdown = render_markdown(sample_digest)
+    assert "<table" not in html and "| word |" not in markdown
+    assert html.count('<article class="study-card">') == 3
+    assert '<strong lang="en">resilience</strong> <span lang="en">n.</span> <span>韌性</span>' in html
+    assert '<p class="study-example" lang="en"><i>Synthetic firms show resilience &amp; &lt; 3.</i></p>' in html
+    assert "補充：常用於經濟議題" in html
+    assert '<strong lang="en">in the long run</strong> <span>長期而言</span>' in html
+    assert "**resilience** · n. · 韌性\n\n*Synthetic firms show resilience &amp; &lt; 3.*\n\n補充：常用於經濟議題" in markdown
+    assert "**in the long run** · 長期而言\n\n*In the long run, synthetic firms adapt.*" in markdown
+
+
+def test_toc_uses_wrapped_chips_and_groups_taiwan(sample_digest: Digest) -> None:
+    html = render_html(sample_digest)
+    nav = html.split('<nav aria-label="目錄">', 1)[1].split('</nav>', 1)[0]
+    assert '<div class="toc-chips">' in nav and '<ul>' not in nav
+    assert '<span class="toc-group"><a href="#taiwan">台灣</a><a href="#taiwan-1">T1</a><a href="#taiwan-2">T2</a><a href="#taiwan-3">T3</a></span>' in nav
+    assert "display:flex;flex-wrap:wrap" in html
+    for anchor in ("brief", "taiwan-1", "taiwan-2", "taiwan-3", "intl-europe", "english", "appendix"):
+        assert f'href="#{anchor}"' in nav
+
+
+@pytest.mark.parametrize("label", ["歐洲", "台灣 T3", "英文學習選文", "<category> & 😀"])
+def test_every_section_continuation_has_heading(label: str) -> None:
+    from econ_digest.telegram.format import bold, strip_tags
+    blocks = [bold(label), *[f'<i>Unique article {index}.</i> ' + "合成內容 😀 &amp;。" * 12 for index in range(4)]]
+    messages = section_messages(blocks, label, 200)
+    assert len(messages) >= 4
+    for message in messages:
+        check_html(message)
+        assert utf16_len(message) <= 200
+    assert all(message.startswith(bold(label + "（續）") + "\n\n") for message in messages[1:])
+    combined = strip_tags("".join(messages))
+    for index in range(4):
+        assert combined.count(f"Unique article {index}.") == 1
+
+
+def test_category_and_taiwan_continuations_are_applied_by_renderer(sample_digest: Digest) -> None:
+    from dataclasses import replace
+    digest = deepcopy(sample_digest)
+    for identifier, category, level in (("sample-7", "intl.europe", 0), ("sample-3", "finance", 3)):
+        base = next(article for article in digest.issue.articles if article.id == identifier)
+        for index in range(5):
+            added_id = f"{identifier}-copy-{index}"
+            digest.issue.articles.append(replace(base, id=added_id))
+            digest.classifications[added_id] = replace(digest.classifications[identifier], article_id=added_id,
+                                                      category=category, taiwan_level=level)
+            digest.summaries[added_id] = replace(digest.summaries[identifier], article_id=added_id)
+    messages = render_telegram(digest, 500)
+    assert any(message.startswith("<b>歐洲（續）</b>") for message in messages)
+    assert any(message.startswith("<b>台灣 T3（續）</b>") for message in messages)
+    assert any(message.startswith("<b>英文學習選文（續）</b>") for message in messages)
+    for message in messages:
+        check_html(message)
+        assert utf16_len(message) <= 500

@@ -144,6 +144,37 @@ def validate_summary(item: dict[str, Any], article: Article, tier: str, *, leade
             raise ValueError("leader_stance requires 2–3 sentences")
 
 
+def _vocabulary_forms(word: str, pos: str) -> set[str]:
+    """Regular inflections; irregular forms must be named in the study note."""
+    word = word.casefold()
+    forms = {word}
+    if pos not in {"n.", "v.", "adj.", "adv."}:
+        return forms
+    forms.update({word + "s", word + "es"})
+    if word.endswith("y") and len(word) > 1 and word[-2] not in "aeiou":
+        forms.add(word[:-1] + "ies")
+    if pos in {"v.", "adj.", "adv."}:
+        stems = {word}
+        if word.endswith("e"):
+            stems.add(word[:-1])
+        if word.endswith("y") and len(word) > 1 and word[-2] not in "aeiou":
+            stems.add(word[:-1] + "i")
+        if len(word) >= 3 and word[-3] not in "aeiou" and word[-2] in "aeiou" and word[-1] not in "aeiouwxy":
+            stems.add(word + word[-1])
+        if word.endswith("c"):
+            stems.add(word + "k")
+        suffixes = ("ed", "ing") if pos == "v." else ("ed", "ing", "er", "est")
+        forms.update(stem + suffix for stem in stems for suffix in suffixes)
+        if word.endswith("ie"):
+            forms.add(word[:-2] + "ying")
+    return forms
+
+
+def _example_has_term(example: str, terms: set[str]) -> bool:
+    return any(re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", canonical_english(example), re.I)
+               for term in terms)
+
+
 def validate_guide(data: dict[str, Any], article: Article, config: EnglishConfig) -> None:
     if not isinstance(data.get("cefr"), str) or data["cefr"] not in {"A2", "B1", "B2", "C1", "C2"}:
         raise ValueError("cefr must be A2–C2")
@@ -166,7 +197,12 @@ def validate_guide(data: dict[str, Any], article: Article, config: EnglishConfig
                 raise ValueError(f"{key}.example_en must occur verbatim in the source")
             if len(example.split()) > 42:
                 raise ValueError(f"{key}.example_en must be trimmed to approximately 40 words")
-            if not re.search(r"(?<!\w)" + re.escape(term) + r"(?!\w)", canonical_english(example), re.I):
+            forms = {term}
+            if key == "vocabulary":
+                forms = _vocabulary_forms(term, item["pos"])
+                forms.update(re.findall(r"(?:原文|過去式|過去分詞|現在分詞|複數|比較級|最高級)[^A-Za-z]{0,30}"
+                                        r"([A-Za-z]+(?:[-'][A-Za-z]+)*)", item["note_zh"]))
+            if not _example_has_term(example, forms):
                 raise ValueError(f"{key}.example_en must contain {term}")
         if len(set(terms)) != len(terms):
             raise ValueError(f"{key} must not repeat terms")
