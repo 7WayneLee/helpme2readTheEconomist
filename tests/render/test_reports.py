@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from collections.abc import Callable
 from html.parser import HTMLParser
 import json
@@ -12,6 +13,9 @@ import pytest
 from econ_digest.models import BriefItem, Digest
 from econ_digest.render import render_html, render_markdown, render_telegram, write_outputs
 from econ_digest.render.telegram import overview_html, section_messages
+from econ_digest.render.common import overview
+from econ_digest.render.telegraph import render_telegraph, summary_message
+from econ_digest.site import build_site
 from econ_digest.taxonomy import CATEGORY_SHORT_LABELS, TIERS
 from econ_digest.telegram.format import check_html, utf16_len
 
@@ -36,6 +40,32 @@ class BalancedHTML(HTMLParser):
 
     def handle_endtag(self, tag: str) -> None:
         assert self.stack.pop() == tag
+
+
+@pytest.mark.parametrize("choice", ["cover", "first-leader", "no-leader"])
+def test_issue_header_across_all_outputs(sample_digest, tmp_path, choice):
+    digest = sample_digest
+    leader = next(article for article in digest.issue.articles if article.kind == "leader")
+    leader.is_cover = choice == "cover"
+    digest.classifications[leader.id].title_zh = "封面立場標題"
+    first = replace(leader, id="first-leader", order=0, is_cover=False)
+    digest.issue.articles.insert(0, first)
+    digest.classifications[first.id] = replace(digest.classifications[leader.id], article_id=first.id, title_zh="第一篇立場標題")
+    if choice == "no-leader":
+        for article in digest.issue.articles:
+            if article.kind == "leader":
+                article.kind = "article"
+    expected = ("封面立場標題｜" if choice == "cover" else "第一篇立場標題｜" if choice == "first-leader" else "")
+    expected += f"共 {len(digest.issue.articles)} 篇文章"
+    assert overview(digest) == expected
+    pages = render_telegraph(digest)
+    outputs = [render_markdown(digest), render_html(digest), "\n".join(render_telegram(digest)),
+               json.dumps(pages[0].nodes, ensure_ascii=False),
+               summary_message(digest, pages, {page.key: "https://telegra.ph/synthetic" for page in pages}),
+               build_site(digest, tmp_path).pages["index"].read_text()]
+    for output in outputs:
+        assert expected in output
+        assert "台灣 T1" not in output and "英文選文：" not in output and "社論" not in output
 
 
 def test_markdown_sections_and_complete_fields(sample_digest: Digest) -> None:

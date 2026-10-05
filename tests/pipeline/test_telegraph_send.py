@@ -207,7 +207,9 @@ def test_cover_fallback_and_messages_mode(prepared_photo: tuple, fallback: str) 
 def test_long_caption_photo_then_summary_with_preview(prepared_photo: tuple) -> None:
     config, directory, opener = prepared_photo
     digest = Digest.from_dict(json.loads((directory / "digest.json").read_text()))
-    digest.issue.articles[0].title = "合成長標題" * 210
+    digest.issue.articles[0].kind = "leader"
+    digest.issue.articles[0].is_cover = True
+    digest.classifications[digest.issue.articles[0].id].title_zh = "合成長標題" * 210
     save_json(directory / "digest.json", digest)
     # A failure after the photo proves the extra summary is an independent resume step.
     opener.fail_message = 1
@@ -412,6 +414,38 @@ def test_pages_only_creates_only_missing_pages_without_state_or_progress(prepare
     assert all(method.startswith("editPage/") for method, _ in opener.calls)
 
 
+def test_pages_only_adds_taiwan_reuses_old_paths_and_edits_in_reading_order(prepared_telegraph):
+    config, directory, opener = prepared_telegraph
+    assert send.send_digest(config) == 0
+    records = json.loads((directory / "telegraph_pages.json").read_text())
+    progress = (directory / "telegram_progress.json").read_bytes()
+    state = (config.paths.data_dir / "state.json").read_bytes()
+    digest = Digest.from_dict(json.loads((directory / "digest.json").read_text()))
+    base = digest.issue.articles[0]
+    added = replace(base, id="taiwan-example", order=20, title="Synthetic Taiwan story")
+    digest.issue.articles.append(added)
+    digest.classifications[added.id] = replace(digest.classifications[base.id], article_id=added.id, taiwan_level=3,
+                                               title_zh="合成台灣故事", taiwan_link="合成產業關聯")
+    digest.summaries[added.id] = replace(digest.summaries[base.id], article_id=added.id)
+    save_json(directory / "digest.json", digest)
+    opener.calls.clear()
+    assert send.send_digest(config, pages_only=True) == 0
+    extended = json.loads((directory / "telegraph_pages.json").read_text())
+    assert extended[:4] == records and extended[4]["key"] == "taiwan:1"
+    assert opener.creates == 5
+    expected = [records[0], extended[4], *records[1:]]
+    edits = [(method, payload) for method, payload in opener.calls if method.startswith("editPage/")]
+    assert [method for method, _ in edits] == ["editPage/" + record["path"] for record in expected]
+    assert [payload["title"].split("｜")[-1] for _, payload in edits] == ["本週導讀", "台灣", "國際", "財經・科技・文化", "英文學習"]
+    assert "合成台灣故事" not in edits[0][1]["content"] and "合成台灣故事" in edits[1][1]["content"]
+    assert (directory / "telegram_progress.json").read_bytes() == progress
+    assert (config.paths.data_dir / "state.json").read_bytes() == state
+    opener.calls.clear()
+    assert send.send_digest(config, pages_only=True) == 0
+    assert opener.creates == 5 and json.loads((directory / "telegraph_pages.json").read_text()) == extended
+    assert all(method.startswith("editPage/") for method, _ in opener.calls)
+
+
 @pytest.mark.parametrize("existing_pages", [False, True])
 def test_pages_only_dry_run_lists_only_page_titles_and_sizes(
         prepared_telegraph: tuple, capsys: pytest.CaptureFixture[str], existing_pages: bool) -> None:
@@ -496,6 +530,12 @@ def test_channel_one_summary_without_private_url_and_resume_no_double_post(prepa
     assert channel["chat_id"] == "-100123456789"
     assert "site.example" in private["text"] and "site.example" not in channel["text"]
     assert "🔒" not in channel["text"]
+    for message in (private, channel):
+        assert "與台灣相關" not in message["text"] and "英文選文：" not in message["text"]
+        assert "共 2 篇文章" in message["text"] and "社論" not in message["text"]
+        labels = ["本週導讀", "國際", "財經・科技・文化", "英文學習"]
+        assert [message["text"].index('>' + label + '</a>') for label in labels] == sorted(
+            message["text"].index('>' + label + '</a>') for label in labels)
     assert channel["link_preview_options"] == private["link_preview_options"]
     assert json.loads((directory / "telegram_progress.json").read_text())["channel_sent"]
     assert not opener.documents and not opener.photos

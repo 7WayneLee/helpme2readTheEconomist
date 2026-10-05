@@ -41,11 +41,10 @@ def test_caption_exact_limit(no_taiwan_digest: Digest, length: int, separate: bo
     digest = no_taiwan_digest
     pages = render_telegraph(digest)
     urls = {page.key: "https://telegra.ph/" + "x" * 400 for page in pages}
-    # Change the English selection title in the visible overview to hit the limit.
-    article = english_article(digest)
-    assert article is not None
+    # A long issue headline must produce a separate summary when necessary.
+    article = next(article for article in digest.issue.articles if article.kind == "leader")
     current = caption_length(summary_message(digest, pages, urls))
-    article.title += "文" * (length - current)
+    digest.classifications[article.id].title_zh += "文" * (length - current)
     caption, followup = summary_caption(digest, pages, urls)
     assert followup is separate
     assert caption_length(caption) <= 1024
@@ -53,47 +52,65 @@ def test_caption_exact_limit(no_taiwan_digest: Digest, length: int, separate: bo
         assert caption_length(caption) == 1024
 
 
-def test_caption_drops_taiwan_block_first(sample_digest: Digest) -> None:
+def test_caption_has_no_taiwan_headline_block(sample_digest: Digest) -> None:
     pages = render_telegraph(sample_digest)
     urls = {page.key: "https://telegra.ph/synthetic" for page in pages}
     for classification in sample_digest.classifications.values():
-        if classification.taiwan_level:
+        if classification.taiwan_level and classification.tier != "merged":
             classification.title_zh = "合成台灣相關標題" * 40
-    assert caption_length(summary_message(sample_digest, pages, urls)) > 1024
+    assert caption_length(summary_message(sample_digest, pages, urls)) < 1024
     caption, separate = summary_caption(sample_digest, pages, urls)
     assert not separate and "與台灣相關" not in caption
-    assert caption == summary_message(sample_digest, pages, urls, include_taiwan=False)
+    assert caption == summary_message(sample_digest, pages, urls)
 
 
-def test_four_pages_order_and_complete_fields(sample_digest: Digest) -> None:
+def test_pages_order_and_taiwan_complete_fields(sample_digest: Digest) -> None:
     pages = render_telegraph(sample_digest)
-    assert [page.key for page in pages] == ["weekly:1", "international:1", "topics:1", "english:1"]
+    assert [page.key for page in pages] == ["weekly:1", "taiwan:1", "international:1", "topics:1", "english:1"]
     assert pages[0].title == "經濟學人導讀 2026/10/03｜本週導讀"
     first = all_text(pages[0].nodes)
-    for text in ("本週要聞速覽", "政治", "商業", "台灣", "台灣本身", "台灣與國際", "間接相關",
+    taiwan = all_text(pages[1].nodes)
+    for text in ("本週要聞速覽", "政治", "商業"):
+        assert text in first
+    assert all(label not in first for label in ("台灣本身", "台灣與國際", "間接相關", "與台灣的關聯"))
+    for text in ("台灣本身", "台灣與國際", "間接相關",
                  "與台灣的關聯", "背景", "文章脈絡", "主張：", "證據：", "反方觀點：", "結論：",
                  "重要引述", "中譯：", "對台灣的意涵", "延伸思考", "經濟學人立場"):
-        assert text in first
+        assert text in taiwan
     assert first.index("台灣相關政治要聞") < first.index("非台灣政治要聞")
     assert "【台灣相關】" in first
-    international = all_text(pages[1].nodes)
+    international = all_text(pages[2].nodes)
     assert [international.index(label) for label in ("美國", "中國", "亞太", "歐洲", "其他地區")] == sorted(
         international.index(label) for label in ("美國", "中國", "亞太", "歐洲", "其他地區"))
-    topics = all_text(pages[2].nodes)
+    topics = all_text(pages[3].nodes)
     assert [topics.index(label) for label in ("財經商業", "科技", "科學", "文化生活")] == sorted(
         topics.index(label) for label in ("財經商業", "科技", "科學", "文化生活"))
-    assert '"tag": "ol"' in json.dumps(pages[0].nodes)
-    assert '"tag": "blockquote"' in json.dumps(pages[0].nodes)
-    assert "特別報導" in first and "封面故事" in first
-    assert "作者主張持續合作" in first
+    assert '"tag": "ol"' in json.dumps(pages[1].nodes)
+    assert '"tag": "blockquote"' in json.dumps(pages[1].nodes)
+    assert "特別報導" in taiwan and "封面故事" in taiwan
+    assert "作者主張持續合作" in taiwan
     merged_leader = next(article for article in sample_digest.issue.articles if article.kind == "leader")
-    assert merged_leader.title in first
+    assert merged_leader.title in taiwan
 
 
 def test_empty_taiwan_headings_omitted(no_taiwan_digest: Digest) -> None:
-    first = all_text(render_telegraph(no_taiwan_digest)[0].nodes)
+    pages = render_telegraph(no_taiwan_digest)
+    assert [page.key for page in pages] == ["weekly:1", "international:1", "topics:1", "english:1"]
+    first = all_text(pages[0].nodes)
     assert "本期沒有這類文章。" not in first
     assert all(label not in first for label in ("台灣本身", "台灣與國際", "間接相關"))
+
+
+def test_only_populated_taiwan_subsections_and_groups(sample_digest):
+    digest = sample_digest
+    digest.week_brief = None
+    digest.english = None
+    digest.summaries = {"sample-3": digest.summaries["sample-3"]}
+    pages = render_telegraph(digest)
+    assert [page.key for page in pages] == ["weekly:1", "taiwan:1"]
+    taiwan = all_text(pages[1].nodes)
+    assert "間接相關" in taiwan and "台灣本身" not in taiwan and "台灣與國際" not in taiwan
+    assert all(symbol not in taiwan for symbol in "①②③")
 
 
 def test_public_guide_has_answers_at_bottom_and_no_full_text(sample_digest: Digest) -> None:
@@ -149,6 +166,10 @@ def test_split_articles_stay_whole_and_include_navigation_budget(sample_digest: 
     urls = {page.key: f"https://telegra.ph/{index:016x}-10-05" for index, page in enumerate(pages)}
     for page in with_navigation(pages, urls):
         assert content_size(page.nodes) <= 10000
+    summary = summary_message(digest, pages, urls)
+    assert summary.count('<a ') == len(pages)
+    assert [summary.index(urls[page.key]) for page in pages] == sorted(summary.index(urls[page.key]) for page in pages)
+    assert "（續 2）" in summary
     for number in range(8):
         matches = [page for page in pages if f"完整文章 {number}" in all_text(page.nodes)]
         assert len(matches) == 1
@@ -161,16 +182,19 @@ def test_oversized_single_article_fails_without_truncation(sample_digest: Digest
         render_telegraph(sample_digest)
 
 
-def test_summary_only_four_primary_links_and_taiwan_priority(sample_digest: Digest) -> None:
+def test_summary_only_title_header_and_ordered_links(sample_digest: Digest) -> None:
+    sample_digest.focus_ids = ["sample-4"]
     pages = render_telegraph(sample_digest)
     urls = {page.key: f"https://telegra.ph/{index}" for index, page in enumerate(pages)}
     summary = summary_message(sample_digest, pages, urls)
     check_html(summary)
     assert "📰 <b>經濟學人導讀" in summary
-    assert "台灣 T1 1 篇、T2 1 篇、T3 1 篇" in summary
-    assert summary.count("• ") == 3 and summary.count("<a ") == 4
-    assert "<b>與台灣相關</b>\n• 台灣晶片展望" in summary
-    assert summary.index("• 台灣晶片展望") < summary.index("• 台灣與國際合作") < summary.index("• 供應鏈間接影響")
+    assert "共 17 篇文章" in summary
+    assert "與台灣相關" not in summary and "• " not in summary and "英文選文：" not in summary
+    assert "社論" not in summary and "🔒" not in summary
+    assert summary.splitlines()[3:] == [f'<a href="{urls[page.key]}">{page.label}</a>' for page in pages]
+    private = summary_message(sample_digest, pages, urls, site_url="https://site.example/issue/index.html")
+    assert private == summary + '\n🔒 圖文完整版（需帳密）：<a href="https://site.example/issue/index.html">開啟</a>'
     assert "①" not in summary and "④" not in summary and "本週導讀" in summary
 
 

@@ -35,8 +35,9 @@ def test_all_renderers_use_neutral_taiwan_labels(sample_digest: Digest, no_taiwa
     rendered = render(no_taiwan_digest if no_taiwan else sample_digest)
     assert not re.search("[\U0001f1e6-\U0001f1ff]", rendered)
     if render is telegraph_summary:
-        assert ("<b>與台灣相關</b>" in rendered) == (not no_taiwan)
-        assert rendered.count("• ") == (0 if no_taiwan else 3)
+        assert "與台灣相關" not in rendered
+        assert "• " not in rendered
+        assert (">台灣</a>" in rendered) == (not no_taiwan)
     else:
         # Weekly brief relevance is independent of the presence of Taiwan articles.
         assert rendered.count("【台灣相關】") == 2
@@ -65,8 +66,9 @@ def test_no_labels_when_no_taiwan_articles_or_brief_items(no_taiwan_digest: Dige
     assert "<b>與台灣相關</b>" not in rendered
 
 
-def test_summary_keeps_only_three_prioritized_headlines(sample_digest: Digest) -> None:
+def test_summary_omits_taiwan_headlines(sample_digest: Digest) -> None:
     sample_digest.classifications["sample-4"].taiwan_level = 1
     rendered = telegraph_summary(sample_digest)
-    assert "<b>與台灣相關</b>\n• 台灣晶片展望\n• 美國政策\n• 台灣與國際合作" in rendered
-    assert "• 供應鏈間接影響" not in rendered
+    assert "與台灣相關" not in rendered and "• " not in rendered
+    for headline in ("台灣晶片展望", "美國政策", "台灣與國際合作", "供應鏈間接影響"):
+        assert headline not in rendered

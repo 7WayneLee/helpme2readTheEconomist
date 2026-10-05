@@ -37,16 +37,40 @@ def test_site_layout_archive_relative_images_epub_navigation(sample_digest, tmp_
     assert (site.root / "assets/site.css").is_file()
     for key, path in site.pages.items():
         html = path.read_text()
-        assert f'href="{key}.html" aria-current="page"' in html
+        breadcrumb = html.split('<nav class="breadcrumb"', 1)[1].split('</nav>', 1)[0]
+        tabs = html.split('<nav class="issue-tabs"', 1)[1].split('</nav>', 1)[0]
+        assert 'href="../index.html">所有期別</a>' in breadcrumb
+        assert 'class="crumb-separator" aria-hidden="true">›</span>' in breadcrumb
+        if key == "index":
+            assert '<span aria-current="page">2026/10/03 號</span>' in breadcrumb
+            assert 'href="index.html"' not in breadcrumb and 'aria-current' not in tabs
+        else:
+            assert '<a href="index.html">2026/10/03 號</a>' in breadcrumb
+            assert f'href="{key}.html" aria-current="page"' in tabs
+            assert tabs.count('aria-current="page"') == 1
         assert "data:image" not in html
         assert 'href="../assets/site.css"' in html
-        for other in site.pages:
-            assert f'href="{other}.html"' in html
-        assert ("← 上一頁" in html) == (key != "index")
-        assert ("下一頁 →" in html) == (key != "english")
+        labels = ["要聞", "台灣", "焦點", "國際", "財經科技文化", "英文"]
+        for other, label in zip(list(site.pages)[1:], labels):
+            assert f'href="{other}.html"' in tabs and f'>{label}</a>' in tabs
+        assert [tabs.index(f'>{label}</a>') for label in labels] == sorted(tabs.index(f'>{label}</a>') for label in labels)
+        assert 'page-nav' not in html
+        assert ('rel="prev"' in html) == (key != "index")
+        assert ('rel="next"' in html) == (key not in ("index", "english"))
+        if key != "index":
+            position = list(site.pages).index(key)
+            previous = list(site.pages)[position - 1]
+            label = "本期導讀" if previous == "index" else labels[position - 2]
+            assert f'<a rel="prev" href="{previous}.html">‹ {label}</a>' in html
+            if key != "english":
+                following = list(site.pages)[position + 1]
+                assert f'<a rel="next" href="{following}.html">{labels[position]} ›</a>' in html
+        assert "社論" not in html
     index = site.pages["index"].read_text()
     assert index.index('class="issue-cover"') < index.index("<h1>")
     assert "下載本期 epub" in index and '<img src="img/' in index
+    assert index.count('class="section-card"') == 6
+    assert '<small>3 篇</small>' in index and '<small>1 篇深度分析</small>' in index
     assert "美國政策" in site.pages["focus"].read_text()
     assert "美國政策" not in site.pages["world"].read_text()
     guide = site.pages["english"].read_text()
@@ -58,6 +82,7 @@ def test_site_layout_archive_relative_images_epub_navigation(sample_digest, tmp_
     archive = (site.root / "index.html").read_text()
     assert archive.index("2026-10-03/index.html") < archive.index("2026-09-26/index.html")
     assert archive.count('alt="本期封面"') == 2
+    assert '<h1>所有期別</h1>' in archive and 'class="issue-tabs"' not in archive
 
 
 def test_site_empty_sections_omitted_and_stale_pages_removed(no_taiwan_digest, tmp_path):
@@ -120,6 +145,9 @@ def test_all_renderers_focus_order_clean_sections_and_cached_wording(sample_dige
         sample_digest.summaries[identifier].tier = "A"
         sample_digest.summaries[identifier].background = f"深入焦點 {identifier}"
     sample_digest.summaries["sample-2"].leader_stance = "社論主張：應持續合作。"
+    sample_digest.english.pre_reading_zh = "社論背景的合成導讀。"
+    sample_digest.english.vocabulary[0].note_zh = "社論中的合成用法。"
+    sample_digest.english.quiz[0].answer = "社論的合成答案。"
     rendered = renderer(sample_digest)
     assert "本週焦點" in rendered
     assert rendered.index("本週焦點") < rendered.index("深入焦點 sample-9") < rendered.index("深入焦點 sample-4")
@@ -142,7 +170,7 @@ def test_one_sentence_card_has_no_empty_disclosure(sample_digest):
 def test_telegraph_only_leading_cover_and_navigation_after_it(sample_digest):
     sample_digest.focus_ids = ["sample-4"]
     pages = render_telegraph(sample_digest, 10000, cover_url="https://site.example/covers/example.jpg")
-    assert [page.key.split(":")[0] for page in pages] == ["weekly", "focus", "international", "topics", "english"]
+    assert [page.key.split(":")[0] for page in pages] == ["weekly", "taiwan", "focus", "international", "topics", "english"]
     for page in with_navigation(pages, {p.key: "https://telegra.ph/" + p.key for p in pages}):
         assert page.nodes[0]["tag"] == "figure"
         assert page.nodes[0]["children"][0] == {"tag": "img", "attrs": {"src": "https://site.example/covers/example.jpg"}, "children": []}

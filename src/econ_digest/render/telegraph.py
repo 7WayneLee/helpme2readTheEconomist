@@ -1,4 +1,4 @@
-"""Four public study pages; original article paragraphs stay in the private chat."""
+"""Ordered public study pages; original paragraphs stay in the private chat."""
 
 from __future__ import annotations
 
@@ -7,10 +7,10 @@ from dataclasses import dataclass, replace
 from ..models import Digest
 from ..telegraph.nodes import Node, content_size, node, validate_nodes
 from ..telegram.format import blockquote, bold, check_html, escape, link, split_html, strip_tags, utf16_len
-from .common import (TAIWAN_TAG, Entry, clean_text, english_article, entries, merged_leader_titles, metadata,
+from .common import (TAIWAN_TAG, Entry, clean_text, english_article, merged_leader_titles, metadata,
                      ordered_brief, overview, sections, summary_fields, title, word_count_label)
 
-GROUPS = (("weekly", "本週導讀"), ("focus", "本週焦點"), ("international", "國際"),
+GROUPS = (("weekly", "本週導讀"), ("taiwan", "台灣"), ("focus", "本週焦點"), ("international", "國際"),
           ("topics", "財經・科技・文化"), ("english", "英文學習"))
 # Random creation titles produce 16 hexadecimal characters plus the date suffix.
 PREVIEW_URL = "https://telegra.ph/0000000000000000-00-00"
@@ -102,16 +102,17 @@ def _logical_blocks(digest: Digest) -> list[list[_Block]]:
         for label, items in (("政治", brief.politics), ("商業", brief.business)):
             if items:
                 weekly.append(_Block((label,), [node("ul", *[node("li", (TAIWAN_TAG if item.taiwan_related else "") + clean_text(item.text_zh)) for item in ordered_brief(items)])]))
+    taiwan: list[_Block] = []
     focus: list[_Block] = []
     international: list[_Block] = []
     topics: list[_Block] = []
     for section in sections(digest):
         if section.anchor.startswith("taiwan-"):
-            weekly.extend(_Block(("台灣", section.title), article_nodes(digest, entry)) for entry in section.entries)
+            taiwan.extend(_Block((section.title,), article_nodes(digest, entry)) for entry in section.entries)
         else:
             target = focus if section.anchor == "focus" else international if section.anchor.startswith("intl-") else topics
             target.extend(_Block((section.title,), article_nodes(digest, entry)) for entry in section.entries)
-    return [weekly, focus, international, topics, [_Block((), english_nodes(digest))] if english_article(digest) else []]
+    return [weekly, taiwan, focus, international, topics, [_Block((), english_nodes(digest))] if english_article(digest) else []]
 
 
 def cover_caption(digest: Digest) -> str:
@@ -123,12 +124,17 @@ def cover_caption(digest: Digest) -> str:
     return "本期封面：" + clean_text(companion.title_zh if companion else title(digest))
 
 
+def _clean_nodes(nodes: list[Node]) -> list[Node]:
+    return [clean_text(item) if isinstance(item, str)
+            else {**item, "children": _clean_nodes(item.get("children", []))} for item in nodes]
+
+
 def _page(digest: Digest, group: int, part: int, nodes: list[Node], cover_url: str | None = None) -> Page:
     suffix = "（續）" if part > 1 else ""
     heading = f"經濟學人導讀 {digest.issue_date.replace('.', '/')}｜{GROUPS[group][1]}{suffix}"
     if cover_url:
         nodes = [node("figure", node("img", src=cover_url), node("figcaption", cover_caption(digest))), *nodes]
-    return Page(f"{GROUPS[group][0]}:{part}", group, part, heading, nodes)
+    return Page(f"{GROUPS[group][0]}:{part}", group, part, heading, _clean_nodes(nodes))
 
 
 def with_navigation(pages: list[Page], urls: dict[str, str]) -> list[Page]:
@@ -169,7 +175,6 @@ def render_telegraph(digest: Digest, page_limit_bytes: int = 60000, *,
     dummy_url = PREVIEW_URL + "x" * max(0, url_reserve_bytes - len(PREVIEW_URL))
     while True:
         # Use a worst-case footer even for the first and last pages.
-        reserved = with_navigation(planned, {page.key: dummy_url for page in planned})
         footer = node("p", node("a", "← 上一頁", href=dummy_url), " · ", node("a", "下一頁 →", href=dummy_url))
         overhead = max(content_size([*page.nodes[:-1], footer]) for page in with_navigation(
             [_page(digest, page.group, page.part, [], cover_url) for page in planned], {page.key: dummy_url for page in planned}))
@@ -201,15 +206,10 @@ def render_telegraph(digest: Digest, page_limit_bytes: int = 60000, *,
         planned = packed
 
 
-def summary_message(digest: Digest, pages: list[Page], urls: dict[str, str], *, include_taiwan: bool = True, site_url: str | None = None) -> str:
+def summary_message(digest: Digest, pages: list[Page], urls: dict[str, str], *, site_url: str | None = None) -> str:
     lines = ["📰 " + bold(title(digest)), escape(overview(digest))]
-    taiwan = sorted((item for item in entries(digest) if item.classification.taiwan_level),
-                    key=lambda item: (item.classification.taiwan_level, item.article.order))
-    if taiwan and include_taiwan:
-        lines.append(bold("與台灣相關"))
-        lines.extend("• " + escape(clean_text(item.classification.title_zh)) for item in taiwan[:3])
     lines.append("")
-    lines.extend(link(urls[page.key], GROUPS[page.group][1]) for page in pages if page.part == 1)
+    lines.extend(link(urls[page.key], page.label) for page in pages)
     if site_url:
         lines.append("🔒 圖文完整版（需帳密）：" + link(site_url, "開啟"))
     message = "\n".join(lines)
@@ -227,8 +227,6 @@ def caption_length(html: str) -> int:
 def summary_caption(digest: Digest, pages: list[Page], urls: dict[str, str]) -> tuple[str, bool]:
     """Return a fitting caption and whether to send the full summary separately."""
     caption = summary_message(digest, pages, urls)
-    if caption_length(caption) > 1024:
-        caption = summary_message(digest, pages, urls, include_taiwan=False)
     if caption_length(caption) > 1024:
         return bold(title(digest)), True
     return caption, False

@@ -14,6 +14,34 @@ from ..models import Digest, save_json
 from ..render.common import clean_text, english_article, overview, sections, title
 from ..render.html import article_html, brief_html, english_html, paragraph
 
+TAB_LABELS = {"brief": "要聞", "taiwan": "台灣", "focus": "焦點", "world": "國際",
+              "topics": "財經科技文化", "english": "英文"}
+
+
+def issue_navigation(issue_date: str, keys: list[str], current: str) -> str:
+    crumb = issue_date.replace(".", "/") + " 號"
+    issue = (f'<span aria-current="page">{crumb}</span>' if current == "index"
+             else f'<a href="index.html">{crumb}</a>')
+    breadcrumb = ('<nav class="breadcrumb" aria-label="網站階層"><a href="../index.html">所有期別</a>'
+                  f'<span class="crumb-separator" aria-hidden="true">›</span>{issue}</nav>')
+    tabs = '<nav class="issue-tabs" aria-label="本期閱讀導覽">'
+    tabs += "".join(f'<a href="{key}.html"' + (' aria-current="page"' if key == current else '')
+                    + f'>{TAB_LABELS[key]}</a>' for key in keys if key != "index")
+    return breadcrumb + tabs + '</nav>'
+
+
+def issue_footer(keys: list[str], current: str) -> str:
+    if current == "index":
+        return ""
+    position = keys.index(current)
+    previous = keys[position - 1]
+    label = TAB_LABELS.get(previous, "本期導讀")
+    footer = f'<footer class="page-footer"><a rel="prev" href="{previous}.html">‹ {label}</a>'
+    if position + 1 < len(keys):
+        following = keys[position + 1]
+        footer += f'<a rel="next" href="{following}.html">{TAB_LABELS[following]} ›</a>'
+    return footer + '</footer>'
+
 
 @dataclass(frozen=True)
 class BuiltSite:
@@ -62,9 +90,12 @@ def build_site(digest: Digest, output_dir: str | Path, epub: str | Path | None =
 
     groups = sections(digest)
     contents: dict[str, tuple[str, str]] = {"index": ("本期導讀", "")}
+    counts: dict[str, str] = {}
     brief = brief_html(digest, images, render_image=render_image)
     if brief:
         contents["brief"] = ("本週要聞速覽", brief)
+        total = len(digest.week_brief.politics) + len(digest.week_brief.business) if digest.week_brief else 0
+        counts["brief"] = f"{total} 則要聞" if total else "本週漫畫"
     for key, label, selected in (
         ("taiwan", "台灣", [s for s in groups if s.anchor.startswith("taiwan-")]),
         ("focus", "本週焦點", [s for s in groups if s.anchor == "focus"]),
@@ -72,6 +103,8 @@ def build_site(digest: Digest, output_dir: str | Path, epub: str | Path | None =
         ("topics", "財經・科技・文化", [s for s in groups if s.anchor in ("finance", "tech", "science", "culture")]),
     ):
         if selected:
+            total = sum(len(section.entries) for section in selected)
+            counts[key] = f"{total} 篇深度分析" if key == "focus" else f"{total} 篇"
             body = ""
             for section in selected:
                 if section.title != label:
@@ -80,26 +113,20 @@ def build_site(digest: Digest, output_dir: str | Path, epub: str | Path | None =
             contents[key] = (label, body)
     if english_article(digest):
         contents["english"] = ("英文學習", english_html(digest))
+        counts["english"] = "1 篇"
     index = render_image(images.cover, title(digest) + " 封面", cover=True) if images.cover else ""
     index += f"<h1>{escape(title(digest))}</h1>" + paragraph(overview(digest))
     if (directory / f"TheEconomist.{digest.issue_date}.epub").exists():
         index += f'<p><a href="TheEconomist.{digest.issue_date}.epub" download>下載本期 epub</a></p>'
     index += '<div class="section-cards">' + "".join(
-        f'<a class="section-card" href="{key}.html">{escape(label)}<span aria-hidden="true"> →</span></a>'
+        f'<a class="section-card" href="{key}.html"><span>{escape(label)}<small>{counts[key]}</small></span><span aria-hidden="true"> →</span></a>'
         for key, (label, _) in contents.items() if key != "index") + '</div>'
     contents["index"] = ("本期導讀", index)
     keys = list(contents)
     paths = {}
-    for position, (key, (label, body)) in enumerate(contents.items()):
-        navigation = '<nav class="page-nav" aria-label="分頁導覽"><a href="../index.html">所有期別</a>'
-        navigation += "".join(f'<a href="{other}.html"' + (' aria-current="page"' if other == key else '') + f'>{escape(other_label)}</a>'
-                              for other, (other_label, _) in contents.items()) + '</nav>'
-        footer = '<footer class="page-footer">'
-        if position:
-            footer += f'<a href="{keys[position - 1]}.html">← 上一頁</a>'
-        if position + 1 < len(keys):
-            footer += f'<a href="{keys[position + 1]}.html">下一頁 →</a>'
-        footer += '</footer>'
+    for key, (label, body) in contents.items():
+        navigation = issue_navigation(digest.issue_date, keys, key)
+        footer = issue_footer(keys, key)
         if key != "index":
             body = f'<header><p>{escape(title(digest))}</p><h1>{escape(label)}</h1></header>' + body
         path = directory / f"{key}.html"
@@ -115,7 +142,7 @@ def build_site(digest: Digest, output_dir: str | Path, epub: str | Path | None =
     cover_name = next((hashlib.sha256(images.cover.data).hexdigest()[:24] + suffix for suffix in (".jpg", ".png", ".gif", ".webp", ".svg", ".img")
                        if images.cover and (directory / "img" / (hashlib.sha256(images.cover.data).hexdigest()[:24] + suffix)).exists()), None)
     save_json(directory / ".issue.json", {"date": date, "title": title(digest), "overview": overview(digest), "cover": cover_name})
-    archive = '<h1>經濟學人導讀封存</h1><div class="archive">'
+    archive = '<h1>所有期別</h1><div class="archive">'
     for metadata in sorted(root.glob("????-??-??/.issue.json"), reverse=True):
         item = json.loads(metadata.read_text(encoding="utf-8"))
         archive += f'<a class="archive-card" href="{item["date"]}/index.html">'
@@ -123,5 +150,5 @@ def build_site(digest: Digest, output_dir: str | Path, epub: str | Path | None =
             archive += f'<img src="{item["date"]}/img/{escape(item["cover"], quote=True)}" alt="本期封面" loading="lazy">'
         archive += '<div><h2>' + escape(item["title"]) + '</h2><p>' + escape(item["overview"]) + '</p></div></a>'
     archive += '</div>'
-    (root / "index.html").write_text(document("經濟學人導讀封存", archive, css="assets/site.css"), encoding="utf-8")
+    (root / "index.html").write_text(document("所有期別", archive, css="assets/site.css"), encoding="utf-8")
     return BuiltSite(date, root, directory, paths, images.cover)

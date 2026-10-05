@@ -77,11 +77,14 @@ def english_article(digest: Digest) -> Article | None:
 
 
 def overview(digest: Digest) -> str:
-    selected = entries(digest)
-    counts = [sum(item.classification.taiwan_level == level for item in selected) for level in (1, 2, 3)]
-    pick = english_article(digest)
-    return (f"共 {len(digest.issue.articles)} 篇文章｜台灣 T1 {counts[0]} 篇、T2 {counts[1]} 篇、"
-            f"T3 {counts[2]} 篇｜英文選文：{pick.title if pick else '本期未選文'}")
+    # Read classifications directly: a cover leader can be merged into its
+    # companion and therefore absent from the rendered summary entries.
+    leaders = [article for article in digest.issue.articles if article.kind == "leader"]
+    leader = next((article for article in leaders if article.is_cover), leaders[0] if leaders else None)
+    classification = digest.classifications.get(leader.id) if leader else None
+    heading = clean_text(classification.title_zh) if classification else ""
+    count = f"共 {len(digest.issue.articles)} 篇文章"
+    return f"{heading}｜{count}" if heading else count
 
 
 def word_count_label(count: int) -> str:
