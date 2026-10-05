@@ -150,3 +150,26 @@ def test_send_failure_returns_one(delivery_config: Config, fake_stages: list[str
     monkeypatch.setattr(pipeline, "_error_notice", lambda *args, **kwargs: None)
     assert pipeline.run_pipeline(delivery_config) == 1
     assert load_state(delivery_config.paths.data_dir)["last_run"]["outcome"] == "failed"
+
+
+def test_run_builds_site_and_performs_backup_after_build(delivery_config, fake_stages, monkeypatch):
+    from econ_digest.config import BackupConfig
+    config = replace(delivery_config, backup=BackupConfig(True, "https://example.invalid/private.git"))
+    calls = []
+    def backup(root, settings, date, data, **kw):
+        assert (root / "2026-10-03/index.html").is_file()
+        calls.append((date, kw))
+    monkeypatch.setattr(pipeline, "backup_output", backup)
+    assert pipeline.run_pipeline(config, no_send=True) == 0
+    assert calls[0][0] == "2026.10.03" and calls[0][1]["dry_run"] is False
+    assert "send" not in fake_stages
+
+
+def test_run_dry_run_only_describes_backup(delivery_config, fake_stages, monkeypatch):
+    from econ_digest.config import BackupConfig
+    config = replace(delivery_config, backup=BackupConfig(True, "https://example.invalid/private.git"))
+    calls = []
+    monkeypatch.setattr(pipeline, "backup_output", lambda *args, **kw: calls.append(kw))
+    monkeypatch.setattr(pipeline, "build_site", lambda *a, **kw: pytest.fail("dry run must not build the private site"))
+    assert pipeline.run_pipeline(config, dry_run=True) == 0
+    assert calls[0]["dry_run"] is True

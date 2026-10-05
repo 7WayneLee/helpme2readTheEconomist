@@ -132,6 +132,23 @@ def _spine_order(archive: zipfile.ZipFile) -> list[tuple[str, str]]:
     return result
 
 
+def article_paragraph_nodes(nodes: list[_Node], threshold: int, kind: str) -> list[_Node]:
+    """The canonical body filter, also used to position embedded images."""
+    paragraphs: list[_Node] = []
+    for node in nodes:
+        if node.tag != "p" or node.position <= threshold or node.has_class("link_navbar"):
+            continue
+        if any(child.has_class("te_section_title") or child.has_class("te_fly_span") for child in node.walk()):
+            continue
+        paragraph = _text(node)
+        if not paragraph:
+            continue
+        if kind == "letters" and paragraph.casefold().startswith("letters are welcome via email"):
+            continue
+        paragraphs.append(node)
+    return paragraphs
+
+
 def _parse_article(html: str, path: str, order: int, nav_section: str) -> Article | None:
     nodes = list(_Document(html).root.walk())
 
@@ -149,18 +166,7 @@ def _parse_article(html: str, path: str, order: int, nav_section: str) -> Articl
     date_node = by_class("te_article_datePublished")
     threshold = date_node.position if date_node else title_node.position
     kind = derive_kind(section, title, fly_title)
-    paragraphs: list[str] = []
-    for node in nodes:
-        if node.tag != "p" or node.position <= threshold or node.has_class("link_navbar"):
-            continue
-        if any(child.has_class("te_section_title") or child.has_class("te_fly_span") for child in node.walk()):
-            continue
-        paragraph = _text(node)
-        if not paragraph:
-            continue
-        if kind == "letters" and paragraph.casefold().startswith("letters are welcome via email"):
-            continue
-        paragraphs.append(paragraph)
+    paragraphs = [_text(node) or "" for node in article_paragraph_nodes(nodes, threshold, kind)]
     return Article(
         id=PurePosixPath(path).stem, order=order, section=section, fly_title=fly_title,
         title=title, rubric=_text(by_class("te_article_rubric")),

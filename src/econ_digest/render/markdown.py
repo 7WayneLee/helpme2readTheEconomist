@@ -5,13 +5,13 @@ from __future__ import annotations
 from html import escape
 
 from ..models import Digest
-from .common import (TAIWAN_TAG, Entry, english_article, generation_time, merged_leader_titles,
-                     metadata, ordered_brief, overview, sections, skipped, statistics, summary_fields, title,
+from .common import (TAIWAN_TAG, Entry, clean_text, english_article, generation_time, merged_leader_titles,
+                     metadata, ordered_brief, overview, sections, summary_fields, title,
                      word_count_label)
 
 
 def text(value: str) -> str:
-    return escape(value, quote=False).replace("\\", "\\\\").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]").replace("`", "\\`")
+    return escape(clean_text(value), quote=False).replace("\\", "\\\\").replace("*", "\\*").replace("[", "\\[").replace("]", "\\]").replace("`", "\\`")
 
 
 def article_lines(digest: Digest, entry: Entry) -> list[str]:
@@ -25,7 +25,7 @@ def article_lines(digest: Digest, entry: Entry) -> list[str]:
         result.extend([f"- {text(value)}" for value in values] if len(values) > 1 else [text(values[0])])
         result.append("")
     if entry.summary.leader_stance:
-        result.extend(["**📰 經濟學人社論立場**", "",
+        result.extend(["**經濟學人立場**", "",
                        *[f"*{text(value)}*" for value in merged_leader_titles(digest, entry)],
                        text(entry.summary.leader_stance), ""])
     return result
@@ -63,28 +63,28 @@ def english_lines(digest: Digest) -> list[str]:
 
 def render_markdown(digest: Digest) -> str:
     groups = sections(digest)
-    toc = [("brief", "本週要聞速覽"), ("taiwan", "台灣"), *[(s.anchor, s.title) for s in groups],
-           ("english", "英文學習選文"), ("appendix", "附錄")]
+    has_brief = bool(digest.week_brief and (digest.week_brief.politics or digest.week_brief.business))
+    taiwan = any(section.anchor.startswith("taiwan-") for section in groups)
+    toc = ([("brief", "本週要聞速覽")] if has_brief else []) + ([("taiwan", "台灣")] if taiwan else [])
+    toc += [(section.anchor, section.title) for section in groups]
+    if english_article(digest):
+        toc.append(("english", "英文學習選文"))
     lines = [f"# {text(title(digest))}", "", f"產生時間：{generation_time(digest)}", "", text(overview(digest)), "", "## 目錄", "",
-             *[f"- [{label}](#{anchor})" for anchor, label in toc], "", '<a id="brief"></a>', "## 本週要聞速覽", ""]
-    for label, items in (("政治", digest.week_brief.politics if digest.week_brief else []),
-                         ("商業", digest.week_brief.business if digest.week_brief else [])):
-        lines.extend([f"### {label}", "", *[f"- {TAIWAN_TAG if item.taiwan_related else ''}{text(item.text_zh)}"
-                                            for item in ordered_brief(items)], ""])
-    lines.extend(['<a id="taiwan"></a>', "## 台灣", ""])
+             *[f"- [{label}](#{anchor})" for anchor, label in toc], ""]
+    if has_brief:
+        lines.extend(['<a id="brief"></a>', "## 本週要聞速覽", ""])
+        for label, items in (("政治", digest.week_brief.politics), ("商業", digest.week_brief.business)):
+            if items:
+                lines.extend([f"### {label}", "", *[f"- {TAIWAN_TAG if item.taiwan_related else ''}{text(item.text_zh)}" for item in ordered_brief(items)], ""])
+    if taiwan:
+        lines.extend(['<a id="taiwan"></a>', "## 台灣", ""])
     for section in groups:
         lines.extend([f'<a id="{section.anchor}"></a>', f"{'###' if section.anchor.startswith('taiwan-') else '##'} {section.title}", ""])
-        if not section.entries:
-            lines.extend(["本期沒有這類文章。", ""])
         for entry in section.entries:
             content = article_lines(digest, entry)
             if section.anchor.startswith("taiwan-"):
                 content[0] = "#" + content[0]
             lines.extend(content)
-    lines.extend(['<a id="english"></a>', "## 英文學習選文", "", *english_lines(digest),
-                  '<a id="appendix"></a>', "## 附錄", "", "### 略過項目", "",
-                  *[f"- {text(name)}（{reason}）" for name, reason in skipped(digest)], "", "### 處理統計", "",
-                  *[f"- {text(value)}" for value in statistics(digest)], ""])
-    if digest.warnings:
-        lines.extend(["### 注意事項", "", *[f"- {text(value)}" for value in digest.warnings], ""])
+    if english_article(digest):
+        lines.extend(['<a id="english"></a>', "## 英文學習選文", "", *english_lines(digest)])
     return "\n".join(lines).rstrip() + "\n"

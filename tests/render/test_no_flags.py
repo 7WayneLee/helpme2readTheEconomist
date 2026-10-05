@@ -46,11 +46,11 @@ def test_all_renderers_use_neutral_taiwan_labels(sample_digest: Digest, no_taiwa
             assert '<span class="badge taiwan">【台灣相關】</span>' in rendered
         if render is telegram_text:
             if no_taiwan:
-                assert "台灣：本期沒有台灣相關文章。" in rendered
+                assert "台灣：本期沒有台灣相關文章。" not in rendered
             else:
                 for level in (1, 2, 3):
                     assert f"<b>T{level} · " in rendered
-                assert "<b>三、間接相關（T3）</b>" in rendered
+                assert "<b>間接相關</b>" in rendered
 
 
 @pytest.mark.parametrize("render", [render_markdown, render_html, telegram_text, telegraph_text, telegraph_summary])

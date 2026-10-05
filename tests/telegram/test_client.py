@@ -493,3 +493,19 @@ def test_link_preview_survives_plain_text_fallback() -> None:
     client.send_message_safe(123, '<a href="https://telegra.ph/test">導讀</a>', link_preview_url="https://telegra.ph/test")
     assert json_body(opener.requests[1])["link_preview_options"] == {"url": "https://telegra.ph/test", "prefer_large_media": False}
     assert "parse_mode" not in json_body(opener.requests[1])
+
+
+def test_prefer_large_media_and_plain_text_retry_keep_preview():
+    client, opener, _ = make_client([api_error(400, "can't parse entities"), success()])
+    url = "https://telegra.ph/example"
+    assert client.send_message_safe("@example_channel", "<b>摘要</b>", link_preview_url=url, prefer_large_media=True) == 42
+    assert all(json_body(request)["link_preview_options"] == {"url": url, "prefer_large_media": True} for request in opener.requests)
+
+
+def test_channel_api_methods():
+    client, opener, _ = make_client([success({"id": -100123456789, "type": "channel"}), success({"status": "administrator", "can_post_messages": True})])
+    assert client.get_chat("@example_channel")["type"] == "channel"
+    assert client.get_chat_member(-100123456789, 7)["can_post_messages"]
+    assert opener.requests[0].full_url.endswith("/getChat")
+    assert json_body(opener.requests[0]) == {"chat_id": "@example_channel"}
+    assert json_body(opener.requests[1]) == {"chat_id": -100123456789, "user_id": 7}

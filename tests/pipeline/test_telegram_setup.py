@@ -93,3 +93,56 @@ def test_env_append_preserves_last_line_and_deduplicates(tmp_path: Path) -> None
     path.write_text("TELEGRAM_CHAT_ID=1\nKEEP=yes\nTELEGRAM_CHAT_ID=2\n")
     telegram_setup.update_chat_id(path, "6")
     assert path.read_text() == "TELEGRAM_CHAT_ID=6\nKEEP=yes\n"
+
+
+@pytest.mark.parametrize("source", ["username", "channel_post", "forward_origin", "forward_from_chat"])
+def test_channel_setup_resolves_verifies_and_preserves_env(delivery_config, tmp_path, monkeypatch, source):
+    from econ_digest.cli import build_parser
+    path = tmp_path / "env"
+    path.write_text("KEEP=yes\nTELEGRAM_CHAT_ID=54321\nTELEGRAM_CHANNEL_ID=-1\n")
+    monkeypatch.setenv("ECON_DIGEST_ENV_FILE", str(path))
+    calls = []
+    class Client:
+        def __init__(self, *a, **kw):
+            pass
+        def get_me(self):
+            return {"username": "example_bot", "id": 7}
+        def get_chat(self, target):
+            calls.append(("chat", target))
+            return {"id": -100123456789, "type": "channel"}
+        def get_chat_member(self, chat_id, user_id):
+            calls.append(("member", chat_id, user_id))
+            return {"status": "administrator", "can_post_messages": True}
+        def get_updates(self):
+            chat = {"id": -100123456789, "type": "channel"}
+            older = {"update_id": 1, "channel_post": {"chat": {"id": -100111111, "type": "channel"}}}
+            if source == "channel_post":
+                message = {"update_id": 2, "channel_post": {"chat": chat}}
+            else:
+                forwarding = {"forward_origin": {"type": "channel", "chat": chat}} if source == "forward_origin" else {"forward_from_chat": chat}
+                message = {"update_id": 2, "message": {"chat": {"id": 123, "type": "private"}, **forwarding}}
+            return [older, message]
+        def send_message_safe(self, chat_id, text):
+            calls.append(("sent", chat_id, text))
+    monkeypatch.setattr(telegram_setup, "TelegramClient", Client)
+    args = build_parser().parse_args(["telegram-setup", "--channel", *(["@example_channel"] if source == "username" else []), "--test"])
+    assert telegram_setup.run(args, delivery_config) == 0
+    assert calls[0] == ("chat", "@example_channel" if source == "username" else -100123456789)
+    assert ("member", -100123456789, 7) in calls
+    assert calls[-1] == ("sent", -100123456789, "✅ 頻道設定完成")
+    assert path.read_text() == "KEEP=yes\nTELEGRAM_CHAT_ID=54321\nTELEGRAM_CHANNEL_ID=-100123456789\n"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+@pytest.mark.parametrize("member", [{"status": "member"}, {"status": "administrator", "can_post_messages": False}])
+def test_channel_setup_rejects_non_posting_bot(delivery_config, tmp_path, monkeypatch, member):
+    path = tmp_path / "env"
+    monkeypatch.setenv("ECON_DIGEST_ENV_FILE", str(path))
+    class Client:
+        def __init__(self, *a, **kw): pass
+        def get_me(self): return {"id": 7}
+        def get_chat(self, target): return {"type": "channel", "id": -100123456789}
+        def get_chat_member(self, chat_id, user_id): return member
+    monkeypatch.setattr(telegram_setup, "TelegramClient", Client)
+    assert telegram_setup.run(argparse.Namespace(channel="@example_channel", wait=0, test=False), delivery_config) == 2
+    assert not path.exists()

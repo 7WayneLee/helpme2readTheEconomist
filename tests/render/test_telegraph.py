@@ -68,11 +68,11 @@ def test_caption_drops_taiwan_block_first(sample_digest: Digest) -> None:
 def test_four_pages_order_and_complete_fields(sample_digest: Digest) -> None:
     pages = render_telegraph(sample_digest)
     assert [page.key for page in pages] == ["weekly:1", "international:1", "topics:1", "english:1"]
-    assert pages[0].title == "經濟學人導讀 2026/10/03｜① 本週導讀"
+    assert pages[0].title == "經濟學人導讀 2026/10/03｜本週導讀"
     first = all_text(pages[0].nodes)
-    for text in ("本週要聞速覽", "政治", "商業", "台灣", "一、台灣本身", "二、台灣與國際", "三、間接相關",
+    for text in ("本週要聞速覽", "政治", "商業", "台灣", "台灣本身", "台灣與國際", "間接相關",
                  "與台灣的關聯", "背景", "文章脈絡", "主張：", "證據：", "反方觀點：", "結論：",
-                 "重要引述", "中譯：", "對台灣的意涵", "延伸思考", "📰 經濟學人社論立場"):
+                 "重要引述", "中譯：", "對台灣的意涵", "延伸思考", "經濟學人立場"):
         assert text in first
     assert first.index("台灣相關政治要聞") < first.index("非台灣政治要聞")
     assert "【台灣相關】" in first
@@ -85,15 +85,15 @@ def test_four_pages_order_and_complete_fields(sample_digest: Digest) -> None:
     assert '"tag": "ol"' in json.dumps(pages[0].nodes)
     assert '"tag": "blockquote"' in json.dumps(pages[0].nodes)
     assert "特別報導" in first and "封面故事" in first
-    assert "社論主張持續合作" in first
+    assert "作者主張持續合作" in first
     merged_leader = next(article for article in sample_digest.issue.articles if article.kind == "leader")
     assert merged_leader.title in first
 
 
-def test_empty_taiwan_headings_always_present(no_taiwan_digest: Digest) -> None:
+def test_empty_taiwan_headings_omitted(no_taiwan_digest: Digest) -> None:
     first = all_text(render_telegraph(no_taiwan_digest)[0].nodes)
-    assert first.count("本期沒有這類文章。") == 3
-    assert all(label in first for label in ("一、台灣本身", "二、台灣與國際", "三、間接相關"))
+    assert "本期沒有這類文章。" not in first
+    assert all(label not in first for label in ("台灣本身", "台灣與國際", "間接相關"))
 
 
 def test_public_guide_has_answers_at_bottom_and_no_full_text(sample_digest: Digest) -> None:
@@ -110,7 +110,7 @@ def test_public_guide_has_answers_at_bottom_and_no_full_text(sample_digest: Dige
     assert guide[-2]["children"] == ["答案"]
     assert "costs remain" in all_text(guide[-1:])
     text = all_text(guide)
-    assert "原文全文已私訊傳送（不公開）。" in text
+    assert "原文全文請見圖文完整版。" in text
     assert text.index("閱讀理解") < text.index("答案")
     assert "句構" in text and "翻譯" in text
     assert "CEFR：B1 · 英文 720 字" in text
@@ -171,7 +171,7 @@ def test_summary_only_four_primary_links_and_taiwan_priority(sample_digest: Dige
     assert summary.count("• ") == 3 and summary.count("<a ") == 4
     assert "<b>與台灣相關</b>\n• 台灣晶片展望" in summary
     assert summary.index("• 台灣晶片展望") < summary.index("• 台灣與國際合作") < summary.index("• 供應鏈間接影響")
-    assert "①" in summary and "④" in summary and "本週導讀：要聞與台灣" in summary
+    assert "①" not in summary and "④" not in summary and "本週導讀" in summary
 
 
 def test_private_original_split_heading_numbering_and_escaping(sample_digest: Digest) -> None:
@@ -193,4 +193,4 @@ def test_private_original_split_heading_numbering_and_escaping(sample_digest: Di
 def test_no_english_pick(sample_digest: Digest) -> None:
     sample_digest.english = None
     assert original_text_messages(sample_digest) == []
-    assert "本期未選文。" in all_text(render_telegraph(sample_digest)[-1].nodes)
+    assert all(not page.key.startswith("english:") for page in render_telegraph(sample_digest))

@@ -14,7 +14,7 @@ import pytest
 
 from econ_digest.commands import send, telegraph_setup
 from econ_digest.cli import build_parser
-from econ_digest.config import Config, SecretsConfig
+from econ_digest.config import Config, SecretsConfig, SiteConfig
 from econ_digest.fetch import issue_directory
 from econ_digest.models import Digest, save_json
 from econ_digest.render.telegraph import caption_length, original_text_messages
@@ -96,11 +96,16 @@ class DeliveryOpener(OpenerDirector):
 @pytest.fixture
 def prepared_telegraph(delivery_config: Config, delivery_digest: Digest, monkeypatch: pytest.MonkeyPatch,
                        tmp_path: Path) -> tuple[Config, Path, DeliveryOpener]:
-    config = replace(delivery_config, telegram=replace(delivery_config.telegram, delivery="telegraph", send_report_file=False),
+    config = replace(delivery_config, telegram=replace(delivery_config.telegram, delivery="telegraph", send_report_file=False, original_text_messages=True),
                      secrets=replace(delivery_config.secrets, telegraph_access_token=TOKEN))
     directory = issue_directory(config, delivery_digest.issue_date)
     # Ensure more than one private text message for resume coverage.
     delivery_digest.issue.articles[0].paragraphs = ["A private synthetic original paragraph & <test>. " * 200, "Another paragraph."]
+    extra = replace(delivery_digest.issue.articles[0], id="international-example", title="Synthetic international story", order=10)
+    delivery_digest.issue.articles.append(extra)
+    base = delivery_digest.classifications[delivery_digest.issue.articles[0].id]
+    delivery_digest.classifications[extra.id] = replace(base, article_id=extra.id, category="intl.us", title_zh="合成國際故事")
+    delivery_digest.summaries[extra.id] = replace(delivery_digest.summaries[base.article_id], article_id=extra.id)
     save_json(directory / "digest.json", delivery_digest)
     (directory / "report.html").write_text("<html>合成完整報告</html>")
     opener = DeliveryOpener()
@@ -112,9 +117,13 @@ def prepared_telegraph(delivery_config: Config, delivery_digest: Digest, monkeyp
 
 
 @pytest.fixture
-def prepared_photo(prepared_telegraph: tuple, illustrated_epub: Path) -> tuple:
+def prepared_photo(prepared_telegraph: tuple, illustrated_epub: Path, monkeypatch: pytest.MonkeyPatch) -> tuple:
     config, directory, opener = prepared_telegraph
-    config = replace(config, telegram=replace(config.telegram, send_report_file=True))
+    config = replace(config, telegram=replace(config.telegram, send_report_file=True, cover_photo=True),
+                     site=SiteConfig(True, "https://site.example", "example-host", "/srv/example"))
+    from econ_digest.site.publish import PublishedSite
+    monkeypatch.setattr(send, "publish_site", lambda site, *args, **kwargs: PublishedSite(
+        "https://site.example/2026-10-03/index.html", "https://site.example/covers/cover.jpg" if site.cover else None))
     shutil.copyfile(illustrated_epub, directory / "TheEconomist.2026.10.03.epub")
     return config, directory, opener
 
@@ -127,7 +136,7 @@ def test_photo_summary_originals_document_order(prepared_photo: tuple, synthetic
     assert methods == ["sendPhoto", *["sendMessage"] * len(original_text_messages(digest)), "sendDocument"]
     caption = opener.photos[0]["caption"]
     assert opener.photos[0]["photo"] == synthetic_pngs["cover"] and opener.photos[0]["parse_mode"] == "HTML"
-    assert caption_length(caption) <= 1024 and caption.count('<a href="') == 4
+    assert caption_length(caption) <= 1024 and caption.count('<a href="') == 5
     assert "原文（點開）" in opener.messages[0]["text"]
     assert opener.calls[-1][1]["caption"] == "完整報告（含插圖與英文選文原文）"
 
@@ -191,7 +200,7 @@ def test_cover_fallback_and_messages_mode(prepared_photo: tuple, fallback: str) 
     assert send.send_digest(config) == 0
     assert not opener.photos and opener.documents == 1
     if fallback != "messages":
-        assert opener.messages[0]["text"].count('<a href="') == 4
+        assert opener.messages[0]["text"].count('<a href="') == 5
         assert "url" in opener.messages[0]["link_preview_options"]
 
 
@@ -208,7 +217,7 @@ def test_long_caption_photo_then_summary_with_preview(prepared_photo: tuple) -> 
     opener.fail_message = None
     assert send.send_digest(config) == 0
     assert len(opener.photos) == 1
-    assert "合成長標題" in opener.messages[0]["text"] and opener.messages[0]["text"].count('<a href="') == 4
+    assert "合成長標題" in opener.messages[0]["text"] and opener.messages[0]["text"].count('<a href="') == 5
     assert "url" in opener.messages[0]["link_preview_options"]
     assert "原文（點開）" in opener.messages[1]["text"]
 
@@ -225,11 +234,11 @@ def test_photo_dry_run_shows_sequence_without_network(prepared_photo: tuple, cap
 def test_telegraph_send_summary_private_original_and_state(prepared_telegraph: tuple, delivery_digest: Digest) -> None:
     config, directory, opener = prepared_telegraph
     assert send.send_digest(config) == 0
-    assert opener.creates == 4 and opener.edits == 4 and opener.documents == 0
+    assert opener.creates == 4 and opener.edits == 4 and opener.documents == 1
     assert len(opener.messages) == 1 + len(original_text_messages(delivery_digest))
     first = opener.messages[0]
     records = json.loads((directory / "telegraph_pages.json").read_text())
-    assert first["link_preview_options"] == {"url": records[0]["url"], "prefer_large_media": False}
+    assert first["link_preview_options"] == {"url": records[0]["url"], "prefer_large_media": True}
     assert first["text"].count("<a ") == 4
     for payload in opener.messages[1:]:
         assert "<blockquote expandable>" in payload["text"]
@@ -330,8 +339,8 @@ def test_dry_run_without_secrets_no_network_or_progress(prepared_telegraph: tupl
     save_state(config.paths.data_dir, state)
     assert send.send_digest(config, dry_run=True) == 0
     output = capsys.readouterr().out
-    assert output.count("位元組") == 4 and "① 本週導讀" in output and "④ 英文學習" in output
-    assert "原文（點開）" in output and "本週導讀：要聞與台灣" in output
+    assert output.count("位元組") == 4 and "本週導讀" in output and "英文學習" in output
+    assert "原文（點開）" in output and "本週導讀" in output
     assert not opener.calls
     assert not (directory / "telegraph_pages.json").exists()
     assert not (directory / "telegram_progress.json").exists()
@@ -416,7 +425,7 @@ def test_pages_only_dry_run_lists_only_page_titles_and_sizes(
     capsys.readouterr()
     args = build_parser().parse_args(["send", "--issue", "2026.10.03", "--pages-only", "--dry-run"])
     assert send.run(args, replace(config, secrets=SecretsConfig())) == 0
-    lines = capsys.readouterr().out.splitlines()
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.endswith(" 位元組")]
     assert len(lines) == 4
     assert all(line.startswith("經濟學人導讀 2026/10/03｜") and line.endswith(" 位元組") for line in lines)
     assert not opener.calls
@@ -437,3 +446,99 @@ def test_pages_only_retry_reuses_allocated_paths_after_failure(prepared_telegrap
     assert (directory / "telegraph_pages.json").read_bytes() == records
     assert not (directory / "telegram_progress.json").exists()
     assert not (config.paths.data_dir / "state.json").exists()
+
+
+def test_new_default_one_summary_large_cover_and_private_link(prepared_photo):
+    config, directory, opener = prepared_photo
+    config = replace(config, telegram=replace(config.telegram, cover_photo=False, original_text_messages=False, send_report_file=False))
+    assert send.send_digest(config) == 0
+    assert len(opener.messages) == 1 and not opener.photos and not opener.documents
+    message = opener.messages[0]
+    assert "🔒 圖文完整版（需帳密）：" in message["text"]
+    assert "https://site.example/2026-10-03/index.html" in message["text"]
+    assert message["link_preview_options"]["prefer_large_media"] is True
+    assert "原文（點開）" not in message["text"] and "①" not in message["text"]
+    assert (config.paths.output_dir / "2026-10-03/TheEconomist.2026.10.03.epub").exists()
+    pages = [payload for method, payload in opener.calls if method.startswith("editPage/")]
+    for page in pages:
+        nodes = json.loads(page["content"])
+        assert nodes[0]["tag"] == "figure"
+        assert nodes[0]["children"][0]["attrs"]["src"] == "https://site.example/covers/cover.jpg"
+
+
+@pytest.mark.parametrize("reason", ["disabled", "publish-failed"])
+def test_new_fallback_omits_site_and_cover_sends_one_message_and_report(prepared_photo, monkeypatch, reason):
+    config, directory, opener = prepared_photo
+    config = replace(config, telegram=replace(config.telegram, cover_photo=True, original_text_messages=False, send_report_file=False))
+    if reason == "disabled":
+        config = replace(config, site=SiteConfig())
+    monkeypatch.setattr(send, "publish_site", lambda *args, **kw: None)
+    assert send.send_digest(config) == 0
+    assert len(opener.messages) == 1 and opener.documents == 1 and not opener.photos
+    assert "site.example" not in opener.messages[0]["text"]
+    assert "🔒" not in opener.messages[0]["text"]
+    assert all('"tag": "figure"' not in payload["content"] for method, payload in opener.calls if method.startswith("editPage/"))
+
+
+def test_channel_one_summary_without_private_url_and_resume_no_double_post(prepared_photo):
+    config, directory, opener = prepared_photo
+    config = replace(config, telegram=replace(config.telegram, cover_photo=False, original_text_messages=False, send_report_file=False),
+                     secrets=replace(config.secrets, telegram_channel_id="-100123456789"))
+    opener.fail_message = 2
+    with pytest.raises(TelegramError):
+        send.send_digest(config)
+    assert len(opener.messages) == 1 and opener.messages[0]["chat_id"] == config.secrets.telegram_chat_id
+    assert not json.loads((directory / "telegram_progress.json").read_text())["channel_sent"]
+    opener.fail_message = None
+    assert send.send_digest(config) == 0
+    assert len(opener.messages) == 2
+    private, channel = opener.messages
+    assert channel["chat_id"] == "-100123456789"
+    assert "site.example" in private["text"] and "site.example" not in channel["text"]
+    assert "🔒" not in channel["text"]
+    assert channel["link_preview_options"] == private["link_preview_options"]
+    assert json.loads((directory / "telegram_progress.json").read_text())["channel_sent"]
+    assert not opener.documents and not opener.photos
+    assert send.send_digest(config) == 0 and len(opener.messages) == 2
+
+
+def test_channel_fallback_never_receives_document_or_originals(prepared_telegraph):
+    config, _, opener = prepared_telegraph
+    config = replace(config, telegram=replace(config.telegram, original_text_messages=False),
+                     secrets=replace(config.secrets, telegram_channel_id="@example_channel"))
+    assert send.send_digest(config) == 0
+    assert len(opener.messages) == 2 and opener.documents == 1
+    documents = [payload for method, payload in opener.calls if method == "sendDocument"]
+    assert all(payload["chat_id"] == config.secrets.telegram_chat_id for payload in documents)
+    channel = opener.messages[1]
+    assert "🔒" not in channel["text"] and "原文" not in channel["text"]
+
+
+def test_dry_run_channel_and_site_backup_are_side_effect_free(prepared_photo, capsys, monkeypatch):
+    from econ_digest.config import BackupConfig
+    config, directory, opener = prepared_photo
+    config = replace(config, telegram=replace(config.telegram, cover_photo=False, original_text_messages=False, send_report_file=False),
+                     backup=BackupConfig(True, "https://example.invalid/private.git"),
+                     secrets=replace(config.secrets, telegram_channel_id="@example_channel"))
+    before = {p: p.read_bytes() for p in directory.iterdir() if p.is_file()}
+    monkeypatch.setattr("econ_digest.site.backup.subprocess.run", lambda *a, **kw: pytest.fail("dry run cannot run subprocess"))
+    assert send.send_digest(config, dry_run=True) == 0
+    text = capsys.readouterr().out
+    private, channel = text.split("--- 頻道訊息 ---")
+    assert "需帳密" in private and "需帳密" not in channel and "site.example" not in channel
+    assert "將備份" in text and "--- 訊息 1/1 ---" in text and not opener.calls
+    assert {p: p.read_bytes() for p in directory.iterdir() if p.is_file()} == before
+
+
+def test_pages_only_rebuilds_site_publishes_and_backs_up_preserving_state(prepared_photo, monkeypatch):
+    from econ_digest.config import BackupConfig
+    config, directory, opener = prepared_photo
+    config = replace(config, backup=BackupConfig(True, "https://example.invalid/private.git"))
+    calls = []
+    monkeypatch.setattr(send, "backup_output", lambda *args, **kw: calls.append((args, kw)))
+    assert send.send_digest(config, pages_only=True) == 0
+    assert (config.paths.output_dir / "2026-10-03/index.html").is_file()
+    assert calls and calls[0][1]["record_state"] is False
+    assert not (config.paths.data_dir / "state.json").exists()
+    assert not (directory / "telegram_progress.json").exists()
+    assert not opener.messages and not opener.photos and not opener.documents

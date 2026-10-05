@@ -10,6 +10,7 @@ from ..config import Config
 from ..fetch import issue_directory, normalize_issue_date
 from ..models import Digest, load_json
 from ..render import write_outputs
+from ..site import build_site
 from . import add_issue_argument
 
 
@@ -31,6 +32,9 @@ def run(args: argparse.Namespace, config: Config) -> int:
         directory = saved_issue_directory(config, args.issue)
         digest = load_json(directory / "digest.json", Digest)
         paths = write_outputs(digest, directory, embed_images=config.report.embed_images)
+        epub = directory / f"TheEconomist.{digest.issue_date}.epub"
+        site = build_site(digest, config.paths.output_dir, epub)
+        print(f"私人網站：{site.pages['index']}")
         for label, path in paths.items():
             print(f"{label}：{path}")
         messages = json.loads(paths["telegram"].read_text(encoding="utf-8"))

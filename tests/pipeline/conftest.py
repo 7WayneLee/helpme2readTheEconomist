@@ -11,7 +11,7 @@ from econ_digest.models import ArticleSummary, Classification, Digest, EnglishPi
 
 @pytest.fixture
 def delivery_config(tmp_path: Path) -> Config:
-    return Config(paths=PathsConfig(tmp_path / "data"),
+    return Config(paths=PathsConfig(tmp_path / "data", tmp_path / "output"),
                   secrets=SecretsConfig(telegram_bot_token="synthetic-secret-token", telegram_chat_id="12345"),
                   telegram=TelegramConfig(message_delay_seconds=0, delivery="messages", send_report_file=True))
 

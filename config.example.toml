@@ -2,6 +2,7 @@
 # 相對路徑以設定檔所在目錄為基準。
 [paths]
 data_dir = "data" # EPUB、快取、報告、狀態與日誌的目錄
+output_dir = "output" # 每期 EPUB 與多頁網站封存
 
 [source]
 repo = "hehonghui/awesome-english-ebooks" # GitHub 儲存庫
@@ -45,8 +46,9 @@ phrase_count = 7 # 片語數
 [telegram]
 enabled = true # 啟用 Telegram 推送
 delivery = "telegraph" # Telegraph 即時檢視；messages 為逐則傳送
-send_report_file = true # 每週附上完整報告檔案
-cover_photo = true # 使用當期封面照片傳送摘要
+send_report_file = false # 網站無法發布時仍會附上備援報告
+cover_photo = false # 選用舊式封面照片傳送
+original_text_messages = false # 選用私訊摺疊原文
 message_delay_seconds = 1.1 # 訊息間隔秒數
 
 [report]
@@ -58,4 +60,18 @@ author_url = "" # 作者連結（選填）
 page_limit_bytes = 60000 # 每頁內容 JSON 的 UTF-8 位元組上限
 
 # 密鑰使用環境變數或 ~/.config/econ-digest/env（權限建議 600）。
-# TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_ID、GITHUB_TOKEN、TELEGRAPH_ACCESS_TOKEN 不放在此檔。
+# TELEGRAM_BOT_TOKEN、TELEGRAM_CHAT_ID、TELEGRAM_CHANNEL_ID、GITHUB_TOKEN、TELEGRAPH_ACCESS_TOKEN 不放在此檔。
+
+[site]
+enabled = false
+base_url = ""
+ssh_host = ""
+remote_dir = ""
+ssh_timeout_seconds = 30
+
+[backup]
+enabled = false
+remote = ""
+branch = "main"
+author_name = ""
+author_email = ""

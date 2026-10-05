@@ -11,6 +11,7 @@ import time
 
 from ..config import Config
 from ..telegram import TelegramClient, discover_private_chats
+from ..telegram.client import discover_channel
 
 
 def update_chat_id(path: Path, chat_id: str) -> None:
@@ -54,6 +55,7 @@ def update_env_value(path: Path, key: str, value: str) -> None:
 
 
 def configure(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--channel", nargs="?", const="", default=None, metavar="@USERNAME", help="設定可張貼訊息的頻道；省略名稱時從更新尋找")
     parser.add_argument("--chat-id", help="直接指定私人聊天室 ID")
     parser.add_argument("--test", action="store_true", help="傳送設定完成訊息")
     parser.add_argument("--wait", type=float, default=120, metavar="SECONDS", help="等候 /start 的秒數（預設 120）")
@@ -71,6 +73,25 @@ def run(args: argparse.Namespace, config: Config) -> int:
         client = TelegramClient(token, min_interval=config.telegram.message_delay_seconds)
         identity = client.get_me()
         print(f"機器人：@{identity.get('username', 'unknown')}")
+        if getattr(args, "channel", None) is not None:
+            target = args.channel or discover_channel(client)
+            if target is None:
+                print("找不到頻道；請在頻道張貼訊息或轉傳頻道訊息給機器人，再重試。")
+                return 2
+            chat = client.get_chat(target)
+            if chat.get("type") != "channel" or not isinstance(chat.get("id"), int):
+                print("指定的聊天室不是頻道。")
+                return 2
+            member = client.get_chat_member(chat["id"], identity["id"])
+            if member.get("status") != "administrator" or member.get("can_post_messages") is not True:
+                print("請將機器人設為頻道管理員並允許張貼訊息。")
+                return 2
+            env_path = Path(os.environ.get("ECON_DIGEST_ENV_FILE", "~/.config/econ-digest/env")).expanduser()
+            update_env_value(env_path, "TELEGRAM_CHANNEL_ID", str(chat["id"]))
+            print("已儲存頻道設定。")
+            if args.test:
+                client.send_message_safe(chat["id"], "✅ 頻道設定完成")
+            return 0
         chat_id = args.chat_id
         if chat_id is None:
             print("請開啟機器人的私人聊天室並傳送 /start。", flush=True)

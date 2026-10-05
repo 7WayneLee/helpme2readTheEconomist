@@ -188,6 +188,18 @@ class TelegramClient:
             raise TelegramError(200, "Invalid getUpdates result")
         return result
 
+    def get_chat(self, chat_id: ChatId) -> dict[str, Any]:
+        result = self._json_request("getChat", {"chat_id": chat_id})
+        if not isinstance(result, dict):
+            raise TelegramError(200, "Invalid getChat result")
+        return result
+
+    def get_chat_member(self, chat_id: ChatId, user_id: int) -> dict[str, Any]:
+        result = self._json_request("getChatMember", {"chat_id": chat_id, "user_id": user_id})
+        if not isinstance(result, dict):
+            raise TelegramError(200, "Invalid getChatMember result")
+        return result
+
     @staticmethod
     def _message_id(result: Any) -> int:
         if (
@@ -200,7 +212,7 @@ class TelegramClient:
 
     def send_message(
         self, chat_id: ChatId, html: str, *, disable_notification: bool = False,
-        link_preview_url: str | None = None,
+        link_preview_url: str | None = None, prefer_large_media: bool = False,
     ) -> int:
         result = self._json_request(
             "sendMessage",
@@ -209,7 +221,7 @@ class TelegramClient:
                 "text": html,
                 "parse_mode": "HTML",
                 "disable_notification": disable_notification,
-                "link_preview_options": ({"url": link_preview_url, "prefer_large_media": False}
+                "link_preview_options": ({"url": link_preview_url, "prefer_large_media": prefer_large_media}
                                          if link_preview_url is not None else {"is_disabled": True}),
             },
             sending=True,
@@ -229,7 +241,7 @@ class TelegramClient:
                 "chat_id": chat_id,
                 "text": strip_tags(html),
                 "disable_notification": kw.get("disable_notification", False),
-                "link_preview_options": ({"url": kw["link_preview_url"], "prefer_large_media": False}
+                "link_preview_options": ({"url": kw["link_preview_url"], "prefer_large_media": kw.get("prefer_large_media", False)}
                                          if kw.get("link_preview_url") is not None else {"is_disabled": True}),
             },
             sending=True,
@@ -333,3 +345,16 @@ def discover_private_chats(client: TelegramClient) -> list[dict[str, Any]]:
             {"chat_id": chat_id, "username": chat.get("username"), "first_name": chat.get("first_name")}
         )
     return chats
+
+
+def discover_channel(client: TelegramClient) -> ChatId | None:
+    updates = sorted(client.get_updates(), key=lambda update: update.get("update_id", 0), reverse=True)
+    for update in updates:
+        message = update.get("channel_post") or update.get("message") or update.get("edited_message")
+        if not isinstance(message, dict):
+            continue
+        origin = message.get("forward_origin") or {}
+        for chat in (message.get("chat"), origin.get("chat"), message.get("forward_from_chat")):
+            if isinstance(chat, dict) and chat.get("type") == "channel" and isinstance(chat.get("id"), (str, int)):
+                return chat["id"]
+    return None

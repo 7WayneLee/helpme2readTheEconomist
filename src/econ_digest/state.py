@@ -45,6 +45,7 @@ class State(TypedDict):
     delivered: dict[str, DeliveryRecord]
     english_history: list[EnglishHistoryRecord]
     last_run: LastRunRecord
+    backup: dict[str, str]
 
 
 def utc_now() -> str:
@@ -53,7 +54,7 @@ def utc_now() -> str:
 
 def empty_state() -> State:
     return {
-        "delivered": {}, "english_history": [],
+        "delivered": {}, "english_history": [], "backup": {},
         "last_run": {"started_at": None, "finished_at": None, "issue_date": None, "outcome": None, "error": None},
     }
 

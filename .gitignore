@@ -9,3 +9,4 @@ config.toml
 .env
 build/
 dist/
+output/

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from ..models import BriefItem, Digest
 from ..telegram.format import blockquote, bold, escape, italic, pack_blocks, split_html, utf16_len
-from .common import (TAIWAN_TAG, Entry, english_article, merged_leader_titles, metadata, ordered_brief, overview,
+from .common import (TAIWAN_TAG, Entry, clean_text, english_article, merged_leader_titles, metadata, ordered_brief, overview,
                      sections, summary_fields, title, word_count_label)
 
 
 def field(label: str, values: list[str]) -> str:
-    return bold(label) + "\n" + "\n".join(("• " if len(values) > 1 else "") + escape(value) for value in values)
+    return bold(label) + "\n" + "\n".join(("• " if len(values) > 1 else "") + escape(clean_text(value)) for value in values)
 
 
 def brief_list(items: list[BriefItem]) -> str:
@@ -18,7 +18,9 @@ def brief_list(items: list[BriefItem]) -> str:
 
 
 def overview_html(digest: Digest) -> str:
-    lines = ["📰 " + bold(title(digest)), escape(overview(digest)), "", bold("本週要聞速覽")]
+    lines = ["📰 " + bold(title(digest)), escape(overview(digest))]
+    if digest.week_brief and (digest.week_brief.politics or digest.week_brief.business):
+        lines.extend(["", bold("本週要聞速覽")])
     if digest.week_brief:
         brief = digest.week_brief
         taiwan = [item for item in [*brief.politics, *brief.business] if item.taiwan_related]
@@ -26,24 +28,29 @@ def overview_html(digest: Digest) -> str:
             lines.append(brief_list(taiwan))
         politics = [item for item in brief.politics if not item.taiwan_related]
         business = [item for item in brief.business if not item.taiwan_related]
-        lines.extend([bold("政治"), brief_list(politics[:8]), bold("商業"), brief_list(business[:5])])
+
+        if politics:
+            lines.extend([bold("政治"), brief_list(politics[:8])])
+        if business:
+            lines.extend([bold("商業"), brief_list(business[:5])])
         remaining = [bold(f"其餘{label}要聞（{len(items)} 則）") + "\n" + brief_list(items)
                      for label, items in (("政治", politics[8:]), ("商業", business[5:])) if items]
         if remaining:
             lines.append(blockquote("\n\n".join(remaining), expandable=True))
     pick = english_article(digest)
-    lines.extend(["", bold("英文學習選文"), italic(pick.title) if pick else "本期未選文。"])
+    if pick:
+        lines.extend(["", bold("英文學習選文"), italic(pick.title)])
     return "\n".join(lines)
 
 
 def full_taiwan_html(digest: Digest, entry: Entry) -> str:
     level = entry.classification.taiwan_level
-    lines = [bold(f"T{level} · {entry.classification.title_zh}"), italic(entry.article.title),
+    lines = [bold(f"T{level} · {clean_text(entry.classification.title_zh)}"), italic(entry.article.title),
              escape(metadata(entry)), field("一句話重點", [entry.summary.headline_zh]),
              field("與台灣的關聯", [entry.classification.taiwan_link or "未提供"])]
     body = [field(label, values) for label, values in summary_fields(entry.summary, headline=False)]
     if entry.summary.leader_stance:
-        body.append(field("📰 經濟學人社論立場", [*merged_leader_titles(digest, entry), entry.summary.leader_stance]))
+        body.append(field("經濟學人立場", [*merged_leader_titles(digest, entry), entry.summary.leader_stance]))
     if body:
         lines.append(blockquote("\n\n".join(body), expandable=True))
     return "\n\n".join(lines)
@@ -51,10 +58,10 @@ def full_taiwan_html(digest: Digest, entry: Entry) -> str:
 
 def compact_html(digest: Digest, entry: Entry, *, taiwan: bool = False) -> str:
     summary = entry.summary
-    label = f"{'T3 · ' if taiwan else ''}{entry.classification.title_zh}"
+    label = f"{'T3 · ' if taiwan else ''}{clean_text(entry.classification.title_zh)}"
     if summary.tier == "E" and not taiwan:
-        return bold(label) + " — " + escape(summary.headline_zh)
-    lines = [bold(label), italic(entry.article.title), escape(metadata(entry)), escape(summary.headline_zh)]
+        return bold(label) + " — " + escape(clean_text(summary.headline_zh))
+    lines = [bold(label), italic(entry.article.title), escape(metadata(entry)), escape(clean_text(summary.headline_zh))]
     if taiwan:
         lines.append(field("與台灣的關聯", [entry.classification.taiwan_link or "未提供"]))
     if summary.tier in ("A", "B"):
@@ -68,7 +75,7 @@ def compact_html(digest: Digest, entry: Entry, *, taiwan: bool = False) -> str:
         if summary.summary_zh:
             lines.append(field("摘要", [summary.summary_zh]))
     if summary.leader_stance:
-        fields.append(("📰 經濟學人社論立場", [*merged_leader_titles(digest, entry), summary.leader_stance]))
+        fields.append(("經濟學人立場", [*merged_leader_titles(digest, entry), summary.leader_stance]))
     if fields:
         lines.append(blockquote("\n\n".join(field(label, values) for label, values in fields), expandable=True))
     return "\n".join(lines)
@@ -105,14 +112,14 @@ def section_messages(blocks: list[str], label: str, limit: int) -> list[str]:
 def render_telegram(digest: Digest, limit: int = 4000) -> list[str]:
     result = split_html(overview_html(digest), limit)
     groups = sections(digest)
-    if not any(section.entries for section in groups[:3]):
-        result.extend(split_html("台灣：本期沒有台灣相關文章。", limit))
-    for section in groups[:2]:
-        for entry in section.entries:
-            result.extend(split_html(full_taiwan_html(digest, entry), limit))
-    if groups[2].entries:
-        result.extend(section_messages([bold("三、間接相關（T3）"), *[compact_html(digest, entry, taiwan=True) for entry in groups[2].entries]], "台灣 T3", limit))
-    for section in groups[3:]:
-        result.extend(section_messages([bold(section.title), *[compact_html(digest, entry) for entry in section.entries]], section.title, limit))
-    result.extend(section_messages(english_blocks(digest), "英文學習選文", limit))
-    return result
+    for section in groups:
+        if section.anchor in ("taiwan-1", "taiwan-2"):
+            for entry in section.entries:
+                result.extend(split_html(full_taiwan_html(digest, entry), limit))
+        else:
+            is_taiwan = section.anchor == "taiwan-3"
+            result.extend(section_messages([bold(section.title), *[compact_html(digest, entry, taiwan=is_taiwan)
+                                           for entry in section.entries]], section.title, limit))
+    if english_article(digest):
+        result.extend(section_messages(english_blocks(digest), "英文學習選文", limit))
+    return [clean_text(message) for message in result]
