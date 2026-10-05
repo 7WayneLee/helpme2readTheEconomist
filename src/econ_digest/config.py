@@ -48,7 +48,7 @@ class ModelsConfig:
     summarize_e: tuple[str, ...] = DEFAULT_MODELS
     brief: tuple[str, ...] = DEFAULT_MODELS
     english: tuple[str, ...] = DEFAULT_MODELS
-    edit: tuple[str, ...] = KEY_MODELS
+    edit: tuple[str, ...] = DEFAULT_MODELS
     ground: tuple[str, ...] = KEY_MODELS
     facts: tuple[str, ...] = KEY_MODELS
 

@@ -25,6 +25,7 @@ def test_defaults_and_frozen_tree(tmp_path: Path) -> None:
     assert config.llm.max_parallel == 2
     assert config.llm.models.classify == ("gemini-3.8-flash-high", "claude-sonnet-4-6")
     assert config.llm.models.focus == ("gemini-3.8-flash-high", "claude-sonnet-4-6")
+    assert config.llm.models.edit == ("gemini-3.8-flash-high", "claude-sonnet-4-6")
     assert config.analysis.focus_count == 3
     assert config.english.min_words == 600
     assert config.english.level.startswith("全民英檢中級")

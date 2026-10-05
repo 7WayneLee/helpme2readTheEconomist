@@ -29,7 +29,9 @@ summarize_d = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # D 級摘要
 summarize_e = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # E 級摘要
 brief = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 本週要聞
 english = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 英語學習
-edit = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"] # 標題與要聞編修
+# 使用 Claude Opus 時，一期 13 個編修區塊（每塊約 3–9 分鐘）曾耗盡所有帳號的 Claude 五小時額度。
+# gwg 會讓整個帳號進入冷卻，連 Gemini 呼叫也受阻，因此編修預設優先使用 Gemini Flash。
+edit = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 標題與要聞編修
 ground = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"] # 台灣關聯查證
 facts = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"] # 台灣事實檔更新提醒
 

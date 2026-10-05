@@ -29,7 +29,7 @@ from conftest import answer, article, issue, summary
 def test_model_routes_and_example(tmp_path: Path) -> None:
     defaults = ModelsConfig()
     for name in defaults.__dataclass_fields__:
-        assert getattr(defaults, name) == (KEY_MODELS if name in {'summarize_a', 'edit', 'ground', 'facts'} else DEFAULT_MODELS)
+        assert getattr(defaults, name) == (KEY_MODELS if name in {'summarize_a', 'ground', 'facts'} else DEFAULT_MODELS)
     example = load_config(Path(__file__).resolve().parents[2] / 'config.example.toml')
     assert example.llm.models == defaults
 
