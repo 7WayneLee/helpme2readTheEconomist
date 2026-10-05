@@ -196,7 +196,12 @@ def test_changed_focus_reuses_unaffected_summary_units(analysis_config: Config, 
 
 def test_prompts_and_validation_use_author_stance() -> None:
     for path in PROMPT_DIR.glob("*.md"):
-        assert "社論" not in path.read_text(), path.name
+        content = path.read_text()
+        if path.name == "_common.md":
+            assert "不得寫「社論」" in content
+            assert "經濟學人立場（Leaders）" in content
+            content = content.replace("不得寫「社論」", "")
+        assert "社論" not in content, path.name
         if path.name.startswith("summarize_"):
             assert "作者主張：" in path.read_text() and "經濟學人立場" in path.read_text()
     data = summary("a1", "C", leader=True)

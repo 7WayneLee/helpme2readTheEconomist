@@ -106,6 +106,19 @@ def test_guide_quiz_cites_valid_paragraph(analysis_config: Config) -> None:
     ("take", "taken", "v.", "過去分詞 taken"),
     ("shun", "shunned", "v.", "常見於外交議題。"),
     ("collide", "collided", "v.", "常見於外交議題。"),
+    ("go", "went", "v.", "常見搭配。"),
+    ("build", "built", "v.", "常見搭配。"),
+    ("grow", "grown", "v.", "常見搭配。"),
+    ("undershoot", "undershot", "v.", "常見搭配。"),
+    ("withstand", "withstood", "v.", "常見搭配。"),
+    ("overtake", "overtook", "v.", "常見搭配。"),
+    ("mislead", "misled", "v.", "常見搭配。"),
+    ("rewrite", "rewritten", "v.", "常見搭配。"),
+    ("criterion", "criteria", "n.", "常見搭配。"),
+    ("credit crunch", "credit crunches", "n.", "常見搭配。"),
+    ("shore up", "shored up", "v.", "常見搭配。"),
+    ("take off", "took off", "phr.", "常見搭配。"),
+    ("well-off", "well‑off", "adj.", "常見搭配。"),
 ])
 def test_guide_accepts_lemma_with_article_inflection(analysis_config: Config, lemma: str,
                                                    form: str, pos: str, note: str) -> None:
@@ -117,10 +130,10 @@ def test_guide_accepts_lemma_with_article_inflection(analysis_config: Config, le
     validate_guide(data, source, analysis_config.english)
 
 
-@pytest.mark.parametrize("lemma,form,note", [("go", "went", "常見搭配。"),
-                                            ("shun", "unshunned", "常見搭配。"),
-                                            ("collide", "planning", "搭配 planning。")])
-def test_guide_rejects_unrelated_or_undocumented_forms(analysis_config: Config, lemma: str,
+@pytest.mark.parametrize("lemma,form,note", [("shun", "unshunned", "常見搭配。"),
+                                            ("collide", "planning", "搭配 planning。"),
+                                            ("go", "planning", "原文為過去式 planning。")])
+def test_guide_rejects_unrelated_forms_even_if_named_in_note(analysis_config: Config, lemma: str,
                                                      form: str, note: str) -> None:
     data = guide()
     example = f"The article uses {form} here."
@@ -139,3 +152,60 @@ def test_lemma_does_not_relax_verbatim_example_check(analysis_config: Config) ->
                                   note_zh="原文為過去式 shunned")
     with pytest.raises(ValueError, match="verbatim"):
         validate_guide(data, source, analysis_config.english)
+
+
+@pytest.mark.parametrize("excerpt", ['"Costs" rose - quickly...then firms\' resolve held.',
+                                    '"Costs" rose‑quickly. . .then firms\' resolve held.'])
+def test_source_comparison_normalises_ellipsis_dash_and_whitespace(excerpt: str) -> None:
+    source = article("a1", paragraphs=['“Costs” rose—quickly…then firms’ resolve held.'])
+    assert source_contains(source, excerpt)
+
+
+def test_guide_accepts_trimmed_analysed_sentence(analysis_config: Config) -> None:
+    data = guide()
+    source = article("a1")
+    source.paragraphs = source.paragraphs[:2] + [data["sentences"][1]["sentence_en"]]
+    data["sentences"][0]["sentence_en"] = "A policy…careful planning."
+    validate_guide(data, source, analysis_config.english)
+    data["sentences"][0]["sentence_en"] = "careful planning…A policy"
+    with pytest.raises(ValueError, match="verbatim"):
+        validate_guide(data, source, analysis_config.english)
+
+
+@pytest.mark.parametrize("phrase,form", [("take off", "took off"), ("credit crunch", "credit crunches"),
+                                       ("firms’ resolve", "firms' resolve")])
+def test_guide_phrase_matching_uses_normalised_forms(analysis_config: Config, phrase: str, form: str) -> None:
+    data = guide()
+    example = f"The article uses {form} here."
+    source = article("a1")
+    source.paragraphs.append(example)
+    data["phrases"][0].update(phrase=phrase, example_en=example)
+    validate_guide(data, source, analysis_config.english)
+
+
+@pytest.mark.parametrize("key,count_field", [("vocabulary", "vocab_count"), ("phrases", "phrase_count")])
+@pytest.mark.parametrize("difference", [-2, -1, 0, 1, 2])
+def test_guide_tolerates_counts_and_trims_extras(analysis_config: Config, key: str, count_field: str,
+                                              difference: int) -> None:
+    from dataclasses import replace
+    data = guide()
+    source = article("a1")
+    items = []
+    for index in range(3 + difference):
+        term = f"term{index}"
+        example = f"The article uses {term} here."
+        source.paragraphs.append(example)
+        item = {**data[key][0], "example_en": example, "word" if key == "vocabulary" else "phrase": term}
+        items.append(item)
+    data[key] = items
+    validate_guide(data, source, replace(analysis_config.english, **{count_field: 3}))
+    assert len(data[key]) == min(3, 3 + difference)
+
+
+@pytest.mark.parametrize("difference", [-3, 3])
+def test_guide_rejects_large_count_mismatch(analysis_config: Config, difference: int) -> None:
+    from dataclasses import replace
+    data = guide()
+    data["vocabulary"] *= 4 + difference
+    with pytest.raises(ValueError, match="approximately 4"):
+        validate_guide(data, article("a1"), replace(analysis_config.english, vocab_count=4))

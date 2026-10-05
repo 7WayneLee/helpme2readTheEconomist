@@ -64,6 +64,22 @@ def test_fake_validation_repair() -> None:
     assert len(client.calls) == 2
 
 
+def test_every_invalid_attempt_logs_reason_stage_and_model_without_prompt(caplog: pytest.LogCaptureFixture) -> None:
+    def validate(data: dict[str, Any]) -> None:
+        raise ValueError("example_en must occur verbatim in the source")
+
+    client = FakeLLMClient(lambda *args: {"ok": True})
+    with caplog.at_level(logging.WARNING), pytest.raises(LLMError):
+        client.generate_json("PRIVATE FULL PROMPT", models=["primary", "fallback"],
+                             stage="english_guide", validate=validate)
+    assert len(caplog.records) == 4
+    assert [record.levelname for record in caplog.records] == ["WARNING"] * 4
+    assert ["model=primary" in record.message for record in caplog.records] == [True, True, False, False]
+    assert all("stage=english_guide" in record.message and
+               "example_en must occur verbatim in the source" in record.message and
+               "PRIVATE FULL PROMPT" not in record.message for record in caplog.records)
+
+
 def test_fake_value_error_is_invalid_output() -> None:
     client = FakeLLMClient(lambda prompt, model, stage: ValueError("synthetic bad output"))
     with pytest.raises(LLMError) as caught:

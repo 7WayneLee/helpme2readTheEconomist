@@ -26,6 +26,18 @@ def test_english_filter_and_history(analysis_config: Config) -> None:
     assert "避免最近兩次" in unit.prompt and "B1–B2" in unit.prompt and "B2–C1" in unit.prompt
 
 
+def test_repick_excludes_failed_article_and_changes_cache_key(analysis_config: Config) -> None:
+    source = issue([article("a1", words=800), article("a2", words=800)])
+    classifications = {item.id: fallback_classification(item) for item in source.articles}
+    original = pick_unit(source, classifications, analysis_config)
+    retry = pick_unit(source, classifications, analysis_config, exclude_ids=frozenset({"a1"}))
+    assert retry.article_ids == ("a2",) and '"id":"a1"' not in retry.prompt
+    assert retry.cache_key != original.cache_key
+    with pytest.raises(ValueError, match="eligible"):
+        retry.validate({"article_id": "a1", "reason_zh": "理由。"})
+    assert pick_unit(source, classifications, analysis_config, exclude_ids=frozenset({"a1", "a2"})) is None
+
+
 @pytest.mark.parametrize("tier", list("ABCDE"))
 def test_large_issue_prompt_limits(tier: str, analysis_config: Config) -> None:
     paragraphs = [" ".join(["synthetic"] * 140)] * 20
