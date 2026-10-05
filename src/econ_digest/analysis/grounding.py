@@ -113,7 +113,15 @@ def apply_grounding(data: dict[str, Any], issue: Issue, classifications: dict[st
     for item in data["articles"]:
         identifier = item["article_id"]
         classification = classifications[identifier]
-        classification.taiwan_level = item["taiwan_level"]
+        level = item["taiwan_level"]
+        # External evidence can establish exposure, but cannot turn an article
+        # about another subject into a Taiwan-led story. Keep the classification's
+        # article-based limit on direct involvement; grounding may narrow it.
+        if level in {1, 2} and classification.taiwan_level in {0, 3}:
+            level = 3
+        elif level == 1 and classification.taiwan_level == 2:
+            level = 2
+        classification.taiwan_level = level
         link = item["taiwan_link"]
         classification.taiwan_link = link["text_zh"] if link else None
         classification.sources = _sources([link] if link else [], evidence[identifier])

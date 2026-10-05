@@ -15,6 +15,7 @@ gwg_bin = "gwg" # gwg 執行檔名稱或完整路徑
 max_parallel = 2 # 同時呼叫數
 call_timeout_seconds = 300 # 單次呼叫逾時秒數
 no_account_wait_seconds = 900 # 無可用帳號時的等待秒數
+stage_timeout_seconds = { edit = 600, ground = 600 } # 其他階段仍使用 call_timeout_seconds
 
 # 依序嘗試；第一個模型是主要模型。
 [llm.models]

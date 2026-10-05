@@ -16,7 +16,7 @@ from econ_digest.analysis.grounding import (apply_grounding, check_facts, facts_
 from econ_digest.analysis.prompts import PROMPT_DIR
 from econ_digest.analysis.summaries import summary_units
 from econ_digest.analysis.validation import validate_summary
-from econ_digest.config import Config, DEFAULT_MODELS, KEY_MODELS, ModelsConfig, load_config
+from econ_digest.config import Config, ConfigError, DEFAULT_MODELS, KEY_MODELS, ModelsConfig, load_config
 from econ_digest.facts import load_taiwan_facts
 from econ_digest.llm import FakeLLMClient, LLMError
 from econ_digest.models import ArticleSummary, BriefItem, Classification, Source, WeekBrief
@@ -33,6 +33,28 @@ def test_model_routes_and_example(tmp_path: Path) -> None:
     assert example.llm.models == defaults
 
 
+def test_stage_timeouts_config_and_runner(tmp_path: Path) -> None:
+    config = Config()
+    assert config.llm.timeout_for('edit') == config.llm.timeout_for('ground') == 600
+    assert config.llm.timeout_for('ground_queries') == 600
+    assert config.llm.timeout_for('facts') == config.llm.timeout_for('summarize_a') == 300
+    path = tmp_path / 'config.toml'
+    path.write_text('[llm]\nstage_timeout_seconds = { facts = 45 }')
+    custom = load_config(path)
+    assert custom.llm.timeout_for('facts') == 45 and custom.llm.timeout_for('edit') == 600
+    class RecordingClient:
+        def generate_json(self, prompt, **kwargs):
+            from econ_digest.llm.api import LLMResult
+            assert kwargs['timeout'] == 45
+            return LLMResult({'alerts': []}, 'claude-opus-4-6-thinking', 0, 0, [])
+    UnitRunner(RecordingClient(), tmp_path / 'cache', timeout_for=custom.llm.timeout_for).run(
+        facts_unit('2026.10.03', [], custom))
+    for value in ['{ edit = 0 }', '{ invented = 600 }', '{ ground = true }']:
+        path.write_text('[llm]\nstage_timeout_seconds = ' + value)
+        with pytest.raises(ConfigError, match='stage_timeout_seconds'):
+            load_config(path)
+
+
 def test_house_style_prefix_on_all_generated_units(analysis_config: Config) -> None:
     source = issue([article('a1', words=800), article('a2')])
     classes = {a.id: Classification(a.id, 0, False, None, 'culture', '政策改變企業成本', tier='A') for a in source.articles}
@@ -47,6 +69,7 @@ def test_house_style_prefix_on_all_generated_units(analysis_config: Config) -> N
     assert all(unit.prompt.startswith(style + '\n') for unit in units)
     assert '泛論「中國影響力擴大，所以台灣受影響」為 0' in units[0].prompt
     assert '待查證的暫定判斷' in units[0].prompt
+    assert '必須保留發言者歸屬與時點' in units[-1].prompt
     for tier in 'abcde':
         assert '0–3' in (PROMPT_DIR / f'summarize_{tier}.md').read_text()
         assert '絕不湊數' in (PROMPT_DIR / f'summarize_{tier}.md').read_text()
@@ -112,6 +135,15 @@ def test_numbers_and_names_preserved_without_using_ids_as_numbers() -> None:
     assert faithful_text('2026年增加成本', {'title_zh': '二零二六年增加成本'})
 
 
+def test_ordinary_house_style_verbs_do_not_trigger_the_new_name_guard() -> None:
+    assert valid_title('全球瘋抹茶帶動增產　日本茶農迎中國低價競爭',
+                       {'title_zh': '全球抹茶熱潮助日本茶農翻身，鹿兒島產量躍居第一與中國競爭威脅'})
+    assert valid_title('川普有意再晤金正恩　北韓堅持擁核考驗美朝外交',
+                       {'title_zh': '川普有意重啟與金正恩峰會，北韓堅持擁核考驗美朝外交'})
+    assert not valid_title('柏南自詡政治異端　挑戰主流政見實為迎合民粹',
+                           {'title': 'Andy Burnham, faux heretic', 'title_zh': '包漢姆自詡政治異端，迎合民粹'})
+
+
 def test_editor_individual_fallback_brief_cache_and_english_untouched(analysis_config: Config, tmp_path: Path) -> None:
     original = replace(article('a1'), title=EDITOR_INPUT['title'], rubric='')
     source = issue([original])
@@ -145,7 +177,7 @@ def test_editor_splits_large_batch(analysis_config: Config) -> None:
     source = issue([replace(article(f'a{i}'), rubric='Synthetic rubric ' * 100) for i in range(70)])
     classes = {a.id: Classification(a.id, 0, False, None, 'culture', '政策改變企業成本', tier='E') for a in source.articles}
     units = edit_units(source, classes, {}, None, analysis_config)
-    assert len(units) > 1 and all(unit.prompt_bytes <= 60_000 for unit in units)
+    assert len(units) > 1 and all(unit.prompt_bytes <= 15_000 and len(unit.article_ids) <= 20 for unit in units)
     assert sum(len(unit.article_ids) for unit in units) == 70
 
 
@@ -191,6 +223,17 @@ def test_ground_link_valid_sources_and_focus_depth(analysis_config: Config) -> N
                           'taiwan_implications': []}]}
     apply_grounding(data, source, classes, summaries, evidence, analysis_config, ['a1'])
     assert classes['a1'].tier == 'A' and classes['a1'].sources == [sample_evidence().source]
+
+
+@pytest.mark.parametrize('provisional, proposed, final', [(3, 1, 3), (3, 2, 3), (0, 1, 3), (2, 1, 2), (1, 3, 3)])
+def test_grounding_cannot_promote_an_article_subject_from_external_context(analysis_config, provisional, proposed, final):
+    source = issue([article('a1')])
+    classes = {'a1': Classification('a1', provisional, False, '合成關聯', 'tech', '合成標題', tier='C')}
+    data = {'articles': [{'article_id': 'a1', 'taiwan_level': proposed,
+                          'taiwan_link': {'text_zh': '歷史事件為具體關聯。', 'basis': ['article']},
+                          'taiwan_implications': []}]}
+    apply_grounding(data, source, classes, {}, {'a1': []}, analysis_config, [])
+    assert classes['a1'].taiwan_level == final
 
 
 def test_cna_unreachable_grounding_fallback_and_cache(analysis_config: Config, tmp_path: Path) -> None:

@@ -77,7 +77,7 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
                      only_tier: str | None = None, limit: int | None = None) -> Digest:
     if len({article.id for article in issue.articles}) != len(issue.articles):
         raise AnalysisError("文章 id 重複，無法分析。")
-    runner = UnitRunner(llm, workdir, progress)
+    runner = UnitRunner(llm, workdir, progress, timeout_for=config.llm.timeout_for)
     by_id = {article.id: article for article in issue.articles}
     warnings: list[str] = []
     classifications: dict[str, Classification] = {}
@@ -141,7 +141,7 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
                 raise
 
     english_client = EnglishClient()
-    english_runner = UnitRunner(english_client, workdir, progress)
+    english_runner = UnitRunner(english_client, workdir, progress, timeout_for=config.llm.timeout_for)
 
     def run_english(unit: Unit) -> tuple[UnitResult, str]:
         errors: list[str] = []

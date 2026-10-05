@@ -59,10 +59,12 @@ def cache_focus_fallback(workdir: Path, result: UnitResult, data: dict[str, Any]
 
 
 class UnitRunner:
-    def __init__(self, llm: LLMClient, workdir: Path, progress: Callable[[str], None] | None = None) -> None:
+    def __init__(self, llm: LLMClient, workdir: Path, progress: Callable[[str], None] | None = None,
+                 timeout_for: Callable[[str], float] | None = None) -> None:
         self.llm = llm
         self.workdir = workdir
         self.progress = progress
+        self.timeout_for = timeout_for
         self.stats: list[LLMCallStat] = []
         self.total_units = 0
         self.failed_units = 0
@@ -78,7 +80,9 @@ class UnitRunner:
         if cached:
             return cached
         try:
-            result = self.llm.generate_json(unit.prompt, models=unit.models, stage=unit.stage, validate=unit.validate)
+            options = {"timeout": self.timeout_for(unit.stage)} if self.timeout_for else {}
+            result = self.llm.generate_json(unit.prompt, models=unit.models, stage=unit.stage,
+                                            validate=unit.validate, **options)
             # Also enforce the contract for third-party implementations of LLMClient.
             unit.validate(result.data)
             data = result.data

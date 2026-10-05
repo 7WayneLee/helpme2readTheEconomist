@@ -61,6 +61,11 @@ class LLMConfig:
     call_timeout_seconds: int = 300
     no_account_wait_seconds: int = 900
     models: ModelsConfig = field(default_factory=ModelsConfig)
+    stage_timeout_seconds: dict[str, int] = field(default_factory=lambda: {"edit": 600, "ground": 600})
+
+    def timeout_for(self, stage: str) -> int:
+        return self.stage_timeout_seconds.get(stage, self.stage_timeout_seconds.get(
+            "ground" if stage == "ground_queries" else stage, self.call_timeout_seconds))
 
 
 @dataclass(frozen=True)
@@ -222,6 +227,8 @@ def _build(cls: type[T], data: dict[str, Any], prefix: str, base_dir: Path) -> T
                 value = {k: v for k, v in value.items() if k in allowed}
                 if name in ("taiwan", "category"):
                     value = {**getattr(defaults, name), **value}
+            if key == "llm.stage_timeout_seconds" and isinstance(value, dict):
+                value = {**defaults.stage_timeout_seconds, **value}
             values[name] = _convert(value, hints[name], key, base_dir)
             if key == "llm.gwg_bin" and ("/" in values[name] or values[name].startswith("~")):
                 values[name] = str((base_dir / Path(values[name]).expanduser()).resolve())
@@ -262,6 +269,12 @@ def _validate(config: Config) -> None:
     for key in ("max_parallel", "call_timeout_seconds", "no_account_wait_seconds"):
         if getattr(config.llm, key) <= 0:
             _fail(f"llm.{key}", "必須大於零")
+    stages = set(ModelsConfig.__dataclass_fields__) | {"english_pick", "english_guide", "ground_queries"}
+    for stage, seconds in config.llm.stage_timeout_seconds.items():
+        if stage not in stages:
+            _fail(f"llm.stage_timeout_seconds.{stage}", "必須是已知的分析階段")
+        if seconds <= 0:
+            _fail(f"llm.stage_timeout_seconds.{stage}", "必須大於零")
     for key in ("min_words", "max_words", "vocab_count", "phrase_count"):
         if getattr(config.english, key) <= 0:
             _fail(f"english.{key}", "必須大於零")

@@ -7,6 +7,7 @@ from typing import Any
 
 from ..config import Config
 from ..models import ArticleSummary, Classification, Issue, WeekBrief
+from ..llm import run_parallel
 from ..zhtw import normalize_zh_tw
 from .cache import UnitRunner
 from .prompts import Unit, make_unit, prompt_json, split_units
@@ -23,6 +24,9 @@ _ALIASES = {"美國": ("America", "American", "United States", "US", "U.S.", "US
             "芬蘭": ("Finland", "Finnish"), "印度": ("India", "Indian")}
 _STYLE_CHARS = set("新聞民調研究報告經濟學人專欄立場作者主張指出分析認為首度首次創下新高低成長降低增加減少擴大縮小差距超越勝過偏好轉向改變變化政策政府國家企業產業市場商業金融貿易關稅出口進口供應鏈晶片半導體人工智慧科技資訊網路軟體發展安全軍事危機熱線通話溝通接聽應變機制缺乏互信建立盼擬恐將未仍已正再更最不無有是對在的與和及或因但使讓於從由為以到了中上下前後內外本此這其個多少兩各新舊大大小強弱難易快慢短長支持反對批評爭取抵禦防堵抗衡展現彰顯冷淡態度拒絕願意回應合作衝突爭議威脅成本壓力財政赤字紀律債券借貸殖利率攀升動盪政治民主選舉選民信仰宗教溫和保守左左右右派基本盤裂痕競爭翻身迎來挑戰問題機會機遇文化傳統節慶宣傳形象統戰影響全球世界國際區域地區地方首長中央市政廳堡壘防線公益慈善援助資金體系採訪記者團改革制度方案計畫措施活動會談峰會能源用電核廢料深層處置封存茶農抹茶增產低價反補貼課稅揚言祭報復軍艦商船空襲據點釀襲控遭獲拚揭陷飆示警反攻重挫破億萬千百十年月份日票席人元幣美元比例百分比程度數據結構原因結果核心關鍵最重要結論方案評估調整成局隱患埋變數平衡秩序歐洲美洲亞洲拉美中東非洲海空首座熱潮新貴底首次時刻面臨路徑供給需求短缺流行遊戲娛樂健身體育科學健康醫療環境生活藝術書籍影視電影音樂飲食旅遊運動森林工廠農業污染氣候暖化溫度燃料汽車電動車利率貸款負債房價勞工工作失業薪資物價價格通膨央行銀行投資債務償還退休儲蓄人口教育學校學生社會家庭夫婦兒童女人男性女性富豪貧富落差暴力犯罪法律法院判決規範限制管制解禁開放民主威權意識形態興起削弱保護徵收稅收收入支出預算削減制裁衰退萎縮風險效益繁榮效率生產銷售直言呼籲重返維持掌握樂觀悲觀看好反映爭奪備受質疑自動化霸權霸主忠誠力量崛起沒能能否可能可望須必需應該如何何處情勢局勢觀察動向焦點重點摘要" )
 _ATTRIBUTIONS = {"經濟學人", "經濟學人專欄", "經濟學人立場", "民調", "研究", "報告", "分析"}
+# These ordinary editing words add no named entities. Keep this vocabulary
+# separate from input facts so a new person or place still fails the name gate.
+_STYLE_CHARS.update("掀擊推引爆砸提狂謀癱瘓涉錄捨靠登若晤瘋帶")
 
 
 def _numbers(value: str) -> set[str]:
@@ -110,7 +114,7 @@ def edit_units(issue: Issue, classifications: dict[str, Classification], summari
                          items=prompt_json(batch))
 
     return split_units(editor_items(issue, classifications, summaries, brief), build,
-                       max_items=10000, max_bytes=60_000)
+                       max_items=20, max_bytes=15_000)
 
 
 def apply_edits(data: dict[str, Any], inputs: list[dict[str, Any]], classifications: dict[str, Classification],
@@ -136,8 +140,10 @@ def apply_edits(data: dict[str, Any], inputs: list[dict[str, Any]], classificati
 def edit_digest(issue: Issue, classifications: dict[str, Classification], summaries: dict[str, ArticleSummary],
                 brief: WeekBrief | None, config: Config, runner: UnitRunner, warnings: list[str]) -> None:
     inputs = editor_items(issue, classifications, summaries, brief)
-    for unit in edit_units(issue, classifications, summaries, brief, config):
-        result = runner.run(unit)
+    units = edit_units(issue, classifications, summaries, brief, config)
+    for result in run_parallel(runner.run, units, config.llm.max_parallel):
+        if isinstance(result, BaseException):
+            raise result
         if result.data:
             apply_edits(result.data, inputs, classifications, summaries, brief)
         else:
