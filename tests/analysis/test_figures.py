@@ -135,6 +135,8 @@ def test_prompt_restricts_ambiguous_marks_and_exception_claims(analysis_config):
     assert "不得使用「僅」「只有」宣稱例外，除非圖中本身以文字明確標示該例外" in unit.prompt
     assert "不要逐一列舉例外，也不要描述細微差異" in unit.prompt
     assert "短箭頭" in unit.prompt and "一個網格刻度以內" in unit.prompt and "折線互相重疊" in unit.prompt
+    assert "箭頭長度相近時，即使箭頭本身很長" in unit.prompt
+    assert "不得宣稱「增幅最大」「箭頭最長」或「最為顯著」" in unit.prompt
     assert "直接印出，或位置清楚落在網格刻度上" in unit.prompt
     assert "至多補充一兩項" in unit.prompt and "不確定的主張直接省略" in unit.prompt
     assert "以 140 字內為目標" in unit.prompt
