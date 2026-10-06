@@ -1,17 +1,19 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
 
 from econ_digest.analysis.classification import classify_units, fallback_classification
 from econ_digest.analysis.english import english_candidates, pick_unit
+from econ_digest.analysis.planning import plan_issue
 from econ_digest.analysis.summaries import BATCH_LIMITS, summary_units
 from econ_digest.analysis.prompts import PROMPT_DIR
 from econ_digest.cli import main
 from econ_digest.config import Config
 from econ_digest.models import Issue
-from conftest import article, issue
+from conftest import article, issue, payload
 
 
 def test_english_filter_and_history(analysis_config: Config) -> None:
@@ -20,10 +22,30 @@ def test_english_filter_and_history(analysis_config: Config) -> None:
                     article("l1", kind="leader", words=800), article("o1", kind="obituary", words=800)])
     assert [item.id for item in english_candidates(source, analysis_config)] == ["a1", "a2", "l1", "o1"]
     classifications = {item.id: fallback_classification(item) for item in source.articles}
-    history = [{"section": f"Section {i}", "kind": "column", "title": f"History {i}"} for i in range(12)]
+    history = [{"issue_date": (date(2026, 7, 11) + timedelta(weeks=i)).strftime("%Y.%m.%d"),
+                "section": f"Section {i}", "kind": "column", "title": f"History {i}"} for i in range(12)]
     unit = pick_unit(source, classifications, analysis_config, history)
     assert "History 3" not in unit.prompt and "History 4" in unit.prompt and "History 11" in unit.prompt
     assert "避免最近兩次" in unit.prompt and "B1–B2" in unit.prompt and "B2–C1" in unit.prompt
+    excluded = [{"issue_date": issue_date, "title": "Excluded", "section": "Other", "kind": "article"}
+                for issue_date in (source.issue_date, "2026.10.10", "2027.01.02")]
+    filtered = pick_unit(source, classifications, analysis_config, [*history[:6], *excluded, *history[6:], *excluded])
+    assert payload(filtered.prompt, "最近最多八次選文：") == [
+        {key: item[key] for key in ("section", "kind", "title")} for item in history[-8:]]
+    assert filtered.cache_key == unit.cache_key
+    assert history[0]["issue_date"] == "2026.07.11"
+
+
+@pytest.mark.parametrize("recorded_id", ["a2", "missing", "a3"])
+def test_plan_reuses_only_valid_latest_delivered_pick(analysis_config: Config, tmp_path: Path,
+                                                     recorded_id: str) -> None:
+    source = issue([article("a1", words=800), article("a2", words=800), article("a3", words=100)])
+    history = [{"issue_date": source.issue_date, "article_id": identifier} for identifier in ("a1", recorded_id)]
+    units, _ = plan_issue(source, analysis_config, workdir=tmp_path / "analysis", english_history=history)
+    picks = [unit for unit in units if unit.stage == "english_pick"]
+    guides = [unit for unit in units if unit.stage == "english_guide"]
+    assert len(picks) == (0 if recorded_id == "a2" else 1)
+    assert guides[0].article_ids == (("a2",) if recorded_id == "a2" else ("a1",))
 
 
 def test_repick_excludes_failed_article_and_changes_cache_key(analysis_config: Config) -> None:

@@ -28,7 +28,7 @@ def _analyze(issue: Issue, config: Config, state: State, progress: Callable[[str
 
     return analyze_issue(issue, config, make_llm_client(config),
                          workdir=issue_directory(config, issue.issue_date) / "analysis",
-                         english_history=state["english_history"][-8:], progress=progress)
+                         english_history=state["english_history"], progress=progress)
 
 
 def _send(config: Config, issue_date: str, *, force: bool, log: Callable[[str], None]) -> int:

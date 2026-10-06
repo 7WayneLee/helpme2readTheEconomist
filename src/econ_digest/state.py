@@ -81,6 +81,16 @@ def save_state(data_dir: str | Path, state: State) -> None:
     save_json(Path(data_dir) / "state.json", state)
 
 
+def record_english(state: State, issue_date: str, article: Article) -> None:
+    """Keep the last delivered pick as the sole record for this issue."""
+    record: EnglishHistoryRecord = {
+        "issue_date": issue_date, "article_id": article.id, "section": article.section,
+        "kind": article.kind, "title": article.title,
+    }
+    state["english_history"] = [item for item in state["english_history"]
+                                if item.get("issue_date") != issue_date] + [record]
+
+
 @contextmanager
 def run_lock(data_dir: str | Path) -> Iterator[None]:
     directory = Path(data_dir)
@@ -116,12 +126,7 @@ class StateStore:
 
     def record_english(self, issue_date: str, article: Article) -> None:
         state = self.load()
-        record: EnglishHistoryRecord = {
-            "issue_date": issue_date, "article_id": article.id, "section": article.section,
-            "kind": article.kind, "title": article.title,
-        }
-        if record not in state["english_history"]:
-            state["english_history"].append(record)
+        record_english(state, issue_date, article)
         self.save(state)
 
     def start_run(self, issue_date: str | None = None) -> None:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -137,6 +137,21 @@ def test_state_history_and_delivery_round_trip(tmp_path: Path, synthetic_article
     assert state["last_run"]["finished_at"] is not None
     save_state(tmp_path, state)
     assert load_state(tmp_path) == state
+
+
+def test_state_store_replaces_legacy_duplicate_english_records(tmp_path: Path, synthetic_article: Article) -> None:
+    store = StateStore(tmp_path)
+    store.record_english("2026.09.26", synthetic_article)
+    store.record_english("2026.10.03", synthetic_article)
+    state = store.load()
+    previous = state["english_history"][0]
+    state["english_history"].append({**state["english_history"][1], "article_id": "legacy-pick"})
+    store.save(state)
+    changed = replace(synthetic_article, id="new-pick", title="Synthetic replacement title")
+    store.record_english("2026.10.03", changed)
+    history = store.load()["english_history"]
+    assert history == [previous, {"issue_date": "2026.10.03", "article_id": changed.id,
+                                 "section": changed.section, "kind": changed.kind, "title": changed.title}]
 
 
 def test_corrupt_state_is_not_reset(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -139,9 +140,77 @@ def test_english_failure_gives_none_and_warning(analysis_config: Config, tmp_pat
     assert digest.english is None and any("英文選文失敗" in warning for warning in digest.warnings)
 
 
+@pytest.mark.parametrize("cached_guide", [False, True])
+def test_latest_delivered_english_pick_skips_pick_model(analysis_config: Config, tmp_path: Path,
+                                                       cached_guide: bool) -> None:
+    from econ_digest.analysis.cache import UnitRunner
+    from econ_digest.analysis.english import guide_unit
+    source = issue([article("a1", words=800), article("a2", words=800)])
+    history = [{"issue_date": source.issue_date, "article_id": "a1"},
+               {"issue_date": "2026.09.26", "article_id": "previous"},
+               {"issue_date": source.issue_date, "article_id": "a2"},
+               {"issue_date": "2026.10.10", "article_id": "future"}]
+    cache = tmp_path / "analysis"
+    if cached_guide:
+        UnitRunner(FakeLLMClient(answer), cache).run(guide_unit(source, source.articles[1], analysis_config))
+    client = FakeLLMClient(answer)
+    progress: list[str] = []
+    digest = analyze_issue(source, analysis_config, client, workdir=cache,
+                           english_history=history, progress=progress.append)
+    assert digest.english.article_id == "a2"
+    assert not any(stage == "english_pick" for _, _, stage in client.calls)
+    assert sum(stage == "english_guide" for _, _, stage in client.calls) == (0 if cached_guide else 1)
+    assert ("english_guide：1 篇（快取）" in progress) == cached_guide
+    assert not any("重新選文" in warning for warning in digest.warnings)
+    warm = FakeLLMClient(lambda *args: AssertionError("cache must prevent calls"))
+    rerun = analyze_issue(source, analysis_config, warm, workdir=cache, english_history=history)
+    assert warm.calls == [] and rerun.llm_calls == []
+    assert rerun.english.to_dict() == digest.english.to_dict()
+
+
+@pytest.mark.parametrize("invalid_id", ["missing", "short", "long", "letters"])
+def test_invalid_latest_delivered_pick_falls_back_with_warning(analysis_config: Config, tmp_path: Path,
+                                                             invalid_id: str) -> None:
+    source = issue([article("a1", words=800), article("a2", words=800), article("short", words=599),
+                    article("long", words=1301), article("letters", kind="letters", words=800)])
+    history = [{"issue_date": source.issue_date, "article_id": "a2"},
+               {"issue_date": source.issue_date, "article_id": invalid_id}]
+    client = FakeLLMClient(answer)
+    digest = analyze_issue(source, analysis_config, client, workdir=tmp_path / "analysis", english_history=history)
+    assert digest.english.article_id == "a1"
+    assert sum(stage == "english_pick" for _, _, stage in client.calls) == 1
+    assert any(invalid_id in warning and "重新選文" in warning for warning in digest.warnings)
+
+
+@pytest.mark.parametrize("delivered", [False, True])
+def test_weekly_analysis_passes_full_history_before_filtering(analysis_config: Config,
+                                                            monkeypatch: pytest.MonkeyPatch, delivered: bool) -> None:
+    from econ_digest import pipeline as weekly
+    from econ_digest.analysis import pipeline as analysis
+    from econ_digest.state import empty_state
+    source = issue([article("a1", words=800), article("a2", words=800)])
+    previous = [{"issue_date": (date(2026, 7, 11) + timedelta(weeks=i)).strftime("%Y.%m.%d"),
+                 "section": "Culture", "kind": "article", "title": f"History {i}"} for i in range(12)]
+    history = [*previous, *([{"issue_date": source.issue_date, "article_id": "a2"}] if delivered else []),
+               *[{"issue_date": "2026.10.10", "article_id": f"future-{i}"} for i in range(9)]]
+    state = empty_state()
+    state["english_history"] = history
+    client = FakeLLMClient(answer)
+    monkeypatch.setattr(analysis, "make_llm_client", lambda _: client)
+    digest = weekly._analyze(source, analysis_config, state, lambda _: None)
+    picks = [prompt for prompt, _, stage in client.calls if stage == "english_pick"]
+    if delivered:
+        assert digest.english.article_id == "a2" and picks == []
+    else:
+        assert digest.english.article_id == "a1" and len(picks) == 1
+        assert payload(picks[0], "最近最多八次選文：") == [
+            {key: item[key] for key in ("section", "kind", "title")} for item in previous[-8:]]
+
+
+@pytest.mark.parametrize("delivered", [False, True])
 @pytest.mark.parametrize("repick_outcome", ["success", "guide_failure", "pick_failure"])
 def test_english_guide_failure_repicks_once_and_retains_reason(analysis_config: Config, tmp_path: Path,
-                                                           repick_outcome: str) -> None:
+                                                           repick_outcome: str, delivered: bool) -> None:
     source = issue([article(f"a{i}", words=800 if i < 2 else 100) for i in range(25)])
     config = replace(analysis_config, llm=replace(analysis_config.llm,
                      models=replace(analysis_config.llm.models, english=("primary", "fallback"))))
@@ -162,14 +231,16 @@ def test_english_guide_failure_repicks_once_and_retains_reason(analysis_config: 
         return answer(prompt, model, stage)
 
     client = FakeLLMClient(responder)
-    digest = analyze_issue(source, config, client, workdir=tmp_path / "analysis")
-    assert picks[0] == ["a0", "a1"]
-    assert all(ids == ["a1"] for ids in picks[1:])
+    history = [{"issue_date": source.issue_date, "article_id": "a0"}] if delivered else None
+    digest = analyze_issue(source, config, client, workdir=tmp_path / "analysis", english_history=history)
+    if not delivered:
+        assert picks[0] == ["a0", "a1"]
+    assert all(ids == ["a1"] for ids in picks[(0 if delivered else 1):])
     failed_guide_calls = [call for call in client.calls if call[2] == "english_guide" and '"article_id":"a0"' in call[0]]
     assert [call[1] for call in failed_guide_calls] == ["primary", "primary", "fallback", "fallback"]
     assert any("must occur verbatim" in warning for warning in digest.warnings)
     if repick_outcome == "success":
-        assert digest.english.article_id == "a1" and len(picks) == 2
+        assert digest.english.article_id == "a1" and len(picks) == (1 if delivered else 2)
         assert any("已改選另一篇" in warning for warning in digest.warnings)
     else:
         assert digest.english is None
@@ -177,7 +248,7 @@ def test_english_guide_failure_repicks_once_and_retains_reason(analysis_config: 
         if repick_outcome == "pick_failure":
             assert any("synthetic repick unavailable" in warning for warning in digest.warnings)
     cached = FakeLLMClient(responder)
-    rerun = analyze_issue(source, config, cached, workdir=tmp_path / "analysis")
+    rerun = analyze_issue(source, config, cached, workdir=tmp_path / "analysis", english_history=history)
     assert (rerun.english.article_id if rerun.english else None) == (digest.english.article_id if digest.english else None)
 
 
@@ -238,7 +309,8 @@ def test_cache_key_changes_with_models_text_and_history(analysis_config: Config,
     models = replace(analysis_config.llm.models, classify=("different",))
     assert first.cache_key != classify_units(source, replace(analysis_config, llm=replace(analysis_config.llm, models=models)))[0].cache_key
     assert pick_unit(source, classifications, analysis_config, []).cache_key != pick_unit(
-        source, classifications, analysis_config, [{"section": "Culture", "kind": "article", "title": "Previous"}]).cache_key
+        source, classifications, analysis_config, [{"issue_date": "2026.09.26", "section": "Culture",
+                                                   "kind": "article", "title": "Previous"}]).cache_key
 
 
 def test_corrupt_cache_is_regenerated(analysis_config: Config, example_issue: Issue, tmp_path: Path) -> None:

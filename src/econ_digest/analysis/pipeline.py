@@ -20,7 +20,7 @@ from ..zhtw import lint_zh_tw, normalize_tree
 from .brief import brief_unit
 from .cache import SKIP_KEYS, UnitResult, UnitRunner, cache_focus_fallback
 from .classification import apply_tiers, classify_units, fallback_classification, fixed_classification, pair_unit
-from .english import guide_unit, pick_unit
+from .english import delivered_pick, guide_unit, pick_unit
 from .editor import edit_digest
 from .grounding import check_facts, ground_digest
 from .focus import apply_focus, fallback_focus, focus_unit
@@ -125,7 +125,11 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
     brief = brief_unit(issue, config)
     if brief:
         units.append(brief)
-    pick = pick_unit(issue, classifications, config, english_history)
+    delivered, warning = delivered_pick(issue, config, english_history)
+    if warning:
+        warnings.append(warning)
+    pick = None if delivered else pick_unit(issue, classifications, config, english_history)
+    english_task = guide_unit(issue, by_id[delivered["article_id"]], config) if delivered else pick
     summaries: dict[str, ArticleSummary] = {}
     week_brief: WeekBrief | None = None
     english: EnglishPick | None = None
@@ -160,15 +164,18 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
 
     def english_job(_: Unit) -> tuple[EnglishPick | None, str | None]:
         nonlocal recovered_english_failure
-        assert pick is not None
         current_pick = pick
         failures: list[str] = []
         for attempt in range(2):
-            selection, reason = run_english(current_pick)
-            if not selection.data:
-                failures.append(f"英文選文失敗（{selection.error_kind}）：{reason}")
-                break
-            article = by_id[selection.data["article_id"]]
+            selection_data = delivered if attempt == 0 else None
+            if selection_data is None:
+                assert current_pick is not None
+                selection, reason = run_english(current_pick)
+                if not selection.data:
+                    failures.append(f"英文選文失敗（{selection.error_kind}）：{reason}")
+                    break
+                selection_data = selection.data
+            article = by_id[selection_data["article_id"]]
             guide, reason = run_english(guide_unit(issue, article, config))
             if guide.data:
                 names = {field.name for field in fields(EnglishPick)} - {"article_id", "reason_zh", "word_count", "reading_minutes"}
@@ -177,7 +184,7 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
                 if failures:
                     recovered_english_failure = 1
                     warning = "；".join(failures) + "；已改選另一篇提供學習指南。"
-                return EnglishPick.from_dict({**data, "article_id": article.id, "reason_zh": selection.data["reason_zh"],
+                return EnglishPick.from_dict({**data, "article_id": article.id, "reason_zh": selection_data["reason_zh"],
                                               "word_count": article.word_count, "reading_minutes": math.ceil(article.word_count / 150)}), warning
             failures.append(f"英文學習指南失敗（{guide.error_kind}，文章 {article.id}）：{reason}")
             if attempt == 0:
@@ -191,9 +198,9 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
         return None, warning
 
     def final_job(unit: Unit) -> UnitResult | tuple[EnglishPick | None, str | None]:
-        return english_job(unit) if unit.stage == "english_pick" else runner.run(unit)
+        return english_job(unit) if unit.stage in {"english_pick", "english_guide"} else runner.run(unit)
 
-    jobs = units + ([pick] if pick else [])
+    jobs = units + ([english_task] if english_task else [])
     for result in run_parallel(final_job, jobs, config.llm.max_parallel):
         if isinstance(result, BaseException):
             raise result
@@ -213,7 +220,7 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
             for identifier in result.unit.article_ids:
                 summaries[identifier] = ArticleSummary(identifier, result.unit.tier, "（摘要產生失敗）" + by_id[identifier].title)
             warnings.append(f"{result.unit.tier} 級摘要失敗（{result.error_kind}）：" + "、".join(result.unit.article_ids))
-    if not pick:
+    if not english_task:
         warnings.append("沒有符合篇幅與文章種類條件的英文選文。")
     edit_digest(issue, classifications, summaries, week_brief, config, runner, warnings)
     cna = CNAClient(config.paths.data_dir / "research", request_budget=config.research.cna_request_budget)
