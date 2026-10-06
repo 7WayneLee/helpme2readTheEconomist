@@ -3,6 +3,7 @@
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol, TypeVar
 
 
@@ -27,6 +28,7 @@ class LLMClient(Protocol):
         self, prompt: str, *, models: Sequence[str], stage: str = "",
         validate: Callable[[dict[str, Any]], None] | None = None,
         timeout: float | None = None,
+        extra_read_dirs: Sequence[str | Path] = (),
     ) -> LLMResult: ...
 
 

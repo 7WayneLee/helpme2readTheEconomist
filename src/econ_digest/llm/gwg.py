@@ -6,7 +6,7 @@ import os
 import signal
 import subprocess
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -31,9 +31,12 @@ class GwgClient(JSONClient):
         self.workdir = Path(workdir)
         self.workdir.mkdir(parents=True, exist_ok=True)
 
-    def _invoke(self, prompt: str, model: str, stage: str, timeout: float) -> Attempt:
+    def _invoke(self, prompt: str, model: str, stage: str, timeout: float,
+                extra_read_dirs: Sequence[str | Path] = ()) -> Attempt:
         command = [self.gwg_bin, "run", "--", "-p", prompt, "--output-format", "json",
                    "--model", model, "--disable-slash-commands", "--print-timeout", f"{int(timeout)}s"]
+        for directory in extra_read_dirs:
+            command.extend(("--add-dir", str(directory)))
         started = time.monotonic()
         try:
             process = subprocess.Popen(command, cwd=self.workdir, stdin=subprocess.DEVNULL,

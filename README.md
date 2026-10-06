@@ -135,6 +135,7 @@
 2. **私人網站（Private Site，需帳密認證）**：
    - **置頂題圖（Head image）**：文章若有配圖，題圖精確置於「一句話重點」標題正上方。
    - **內文圖表與地圖（Inline charts / maps / photos）**：僅出現在 **Tier A 深度解析**文章（台灣 T1 報導與本週焦點），並依照段落編號精準插入於「文章脈絡」對應段落旁。
+   - **內文圖片說明**：模型直接查看圖片，圖表與地圖附「▲ 圖表：…」，照片與插畫附「▲ 配圖：…」，替代文字同步採用說明。圖表以 2–3 句交代比較對象、單位、期間、重要數值或趨勢及圖中來源；說明失敗時仍保留原圖。單檔 HTML 報告也採用相同圖說。
    - **要聞速覽配圖**：要聞插圖緊接在所說明的條目下方，帶有「▲ 配圖：…」圖說。
    - **本週漫畫（Cartoon）**：於要聞區塊下方專設「本週漫畫」專題展示。
 
@@ -193,6 +194,7 @@ output/
 2. **置頂黏性章節分頁籤（Sticky Section Tabs）**：置頂橫向分頁導覽列（包含「要聞」、「台灣」、「焦點」、「國際」、「財經科技文化」、「英文」），隨頁面滾動固定於頂部，當前所在頁面高亮標示（`aria-current="page"`），便於單手滑動切換。
 3. **頁尾章節切換連結（Previous / Next Links）**：各章節底部提供「‹ 前一章節」與「後一章節 ›」切換按鈕，方便讀者順暢依序通讀全刊導讀。
 4. **具體查證出處標註**：在台灣專區與相關文章之「與台灣的關聯」或「對台灣的意涵」段落下方，精準附上至多 3 筆「依據：中央社 YYYY/MM/DD〈標題〉」外部查證連結。
+5. **閱讀摘要預設展開**：台灣專區所有文章的「閱讀摘要」均預設展開，包含 C 級文章；其他專區依原有規則僅展開 A、B 級摘要。單檔 HTML 報告的台灣文章亦同。
 
 ### 私人網站發布（Private Site Publishing）
 
@@ -415,6 +417,8 @@ author_email = "you@example.com"
    ↓
 [facts] 每週定期檢查台灣事實清單（taiwan.md）時效性，發送私密更新提醒
    ↓
+[figures] 查看深度解析「文章脈絡」內文圖片，產生圖表、地圖、照片與插畫說明（每篇各自分批，每批至多 4 張）
+   ↓
 [zh-TW normalisation] 僅針對含非 Big5 字元之 CJK 片段以 OpenCC 轉繁，套用 glossary.tsv
    ↓
 [render & site build] 產生 Markdown、HTML 報告、Telegraph 頁面（獨立台灣頁）與 output/ 多頁網站（雙層導覽）
@@ -434,6 +438,7 @@ author_email = "you@example.com"
 | `src/econ_digest/analysis/editor.py` | 標題、一句話重點與要聞編修，支援批次切分與逐欄位安全驗證退回機制。 |
 | `src/econ_digest/analysis/grounding.py` | 台灣關聯查證（`ground_queries`、`ground`）與事實清單每週時效檢查（`facts`）。 |
 | `src/econ_digest/analysis/focus.py` | 評選本週 3 篇關鍵國際焦點專文並升級為 Tier A。 |
+| `src/econ_digest/analysis/figures.py` | 以圖片像素產生私人 HTML 圖說，獨立快取並保留無說明的原圖備援。 |
 | `src/econ_digest/research/cna.py` | 檢索中央社（CNA）新聞客觀證據、精確 URL 日期解析、禮貌頻寬限制與短摘錄快取。 |
 | `src/econ_digest/facts/` | 具體日期與出處之台灣核心現況事實清單（`taiwan.md`）與載入器（`__init__.py`）。 |
 | `src/econ_digest/render/` | Markdown、HTML 報告、Telegraph 頁面節點與 Telegram 訊息切塊。 |
@@ -458,8 +463,12 @@ author_email = "you@example.com"
 | `ground_queries` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 600 秒 | 針對涉台候選報導提出 1–3 組中央社繁體中文搜尋詞（共用 `ground` 模型與逾時設定）。 |
 | `ground` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 600 秒 | 結合中央社客觀證據查證台灣關聯與具體意涵（每批至多 3 篇 / 90 KB）。 |
 | `facts` | Claude Opus 4.6 (thinking) | Gemini 3.8 Flash | 300 秒 | 比對中央社最新要聞與台灣事實清單（`taiwan.md`）新鮮度。 |
+| `figures` | Gemini 3.8 Flash | Claude Sonnet 4.6 | 300 秒 | 台灣 T1 或本週焦點之 A 級文章內文圖片說明，每篇獨立呼叫、每批至多 4 張。 |
 
 #### 路由與執行特性
+
+`figures` 以 `[llm.models] figures` 設定模型。圖片提取至已忽略的 `data/issues/te_YYYY.MM.DD/figures/`，透過 gwg 的 `--add-dir` 授權讀取；快取鍵包含圖片內容雜湊。圖說不送入其他提示詞，已有分析快取可直接沿用；`analyze --plan` 會列出圖片單元但不提取檔案或呼叫模型。
+
 1. **模型分工與備援機制**：
    - **Claude Opus 4.6 (thinking)**：主理最高思維深度任務（Tier A 深度解析 `summarize_a`、關聯查證 `ground`（`ground_queries` 亦共用此模型設定）與事實更新檢查 `facts`）。若呼叫失敗自動降級至 Gemini 3.8 Flash。
    - **Gemini 3.8 Flash**：主理高吞吐常規任務（初步分類、焦點評選、常規摘要、要聞速覽、英文選文，以及標題與要聞編修 `edit`）。若呼叫失敗自動切換至 Claude Sonnet 4.6。

@@ -23,6 +23,8 @@ class Unit:
     validate: Callable[[dict[str, Any]], None]
     tier: str = ""
     prompt_hash: str = ""
+    extra_read_dirs: tuple[Path, ...] = ()
+    image_hashes: tuple[tuple[str, str], ...] = ()
 
     @property
     def prompt_bytes(self) -> int:
@@ -32,6 +34,9 @@ class Unit:
     def cache_key(self) -> str:
         identity = [self.stage, sorted(self.article_ids), self.tier, self.prompt_hash,
                     list(self.models), self.prompt]
+        # Keep every existing text-stage key unchanged.
+        if self.image_hashes:
+            identity.append(self.image_hashes)
         return hashlib.sha256(json.dumps(identity, ensure_ascii=False).encode()).hexdigest()
 
 
@@ -50,8 +55,13 @@ def render_prompt(name: str, issue_date: str, **values: Any) -> tuple[str, str]:
                 columns = row.split("|")
                 blacklist.append(columns[1].strip() + " → " + columns[3].strip())
         style = style.split("\n## 三、", 1)[0] + "\n翻譯腔替換：\n" + "\n".join(blacklist)
-    source = style + "\n" + (
-        PROMPT_DIR / "_common.md").read_text(encoding="utf-8") + "\n" + (
+    common = (PROMPT_DIR / "_common.md").read_text(encoding="utf-8")
+    if name == "figures":
+        # Vision needs local image access; all text prompts retain their exact
+        # source and hash, including the shared no-tools instruction.
+        common = common.replace("不要使用任何工具，直接回答。",
+                                "只使用讀檔或讀圖工具開啟指定的圖片，不要使用其他工具。")
+    source = style + "\n" + common + "\n" + (
         PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8")
     digest = hashlib.sha256(source.encode()).hexdigest()
     return Template(source).substitute(issue_date=issue_date, **values), digest

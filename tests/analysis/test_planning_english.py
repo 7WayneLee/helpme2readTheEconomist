@@ -75,7 +75,7 @@ def test_plan_no_llm_and_filters(analysis_config: Config, example_issue: Issue, 
 
 
 def test_all_prompt_files_exist() -> None:
-    expected = {"_common.md", "_style.md", "edit.md", "ground_queries.md", "ground.md", "facts.md",
+    expected = {"_common.md", "_style.md", "edit.md", "ground_queries.md", "ground.md", "facts.md", "figures.md",
                 "classify.md", "pair.md", "focus.md", "brief.md", "english_pick.md", "english_guide.md",
                 *(f"summarize_{tier}.md" for tier in "abcde")}
     assert {path.name for path in PROMPT_DIR.glob("*.md")} == expected

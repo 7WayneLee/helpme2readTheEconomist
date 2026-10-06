@@ -32,6 +32,12 @@ def test_public_pages_never_contain_media(sample_digest: Digest) -> None:
         inspect(page.nodes)
 
 
+def test_figure_notes_do_not_change_public_pages(sample_digest: Digest) -> None:
+    before = render_telegraph(sample_digest)
+    sample_digest.figure_notes = {"synthetic.png": {"kind": "chart", "description_zh": "合成私人圖表說明。"}}
+    assert render_telegraph(sample_digest) == before
+
+
 def test_caption_measures_visible_utf16() -> None:
     assert caption_length('<b>台灣 &amp; &#128512;</b><a href="https://example.invalid/long-url">連結</a>') == 9
 

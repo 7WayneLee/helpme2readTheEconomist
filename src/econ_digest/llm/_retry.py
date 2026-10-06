@@ -5,6 +5,7 @@ import math
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .api import LLMError, LLMResult
@@ -49,13 +50,15 @@ class JSONClient:
         self.no_account_wait = no_account_wait
         self.sleep = sleep
 
-    def _invoke(self, prompt: str, model: str, stage: str, timeout: float) -> Attempt:
+    def _invoke(self, prompt: str, model: str, stage: str, timeout: float,
+                extra_read_dirs: Sequence[str | Path] = ()) -> Attempt:
         raise NotImplementedError
 
     def generate_json(
         self, prompt: str, *, models: Sequence[str], stage: str = "",
         validate: Callable[[dict[str, Any]], None] | None = None,
         timeout: float | None = None,
+        extra_read_dirs: Sequence[str | Path] = (),
     ) -> LLMResult:
         if len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
             raise ValueError("Prompt exceeds 100,000 UTF-8 bytes; split the input into smaller batches")
@@ -74,7 +77,8 @@ class JSONClient:
             while True:
                 logger.debug("LLM stage=%s model=%s prompt=%s", stage, model,
                              current_prompt[:200].replace("\r", " ").replace("\n", " "))
-                attempt = self._invoke(current_prompt, model, stage, effective_timeout)
+                attempt = self._invoke(current_prompt, model, stage, effective_timeout,
+                                       extra_read_dirs=extra_read_dirs)
                 data: dict[str, Any] | None = None
                 if attempt.kind == "success":
                     try:

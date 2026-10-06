@@ -15,7 +15,7 @@ from ..zhtw import DEFAULT_SKIP_KEYS
 from .prompts import Unit
 
 SKIP_KEYS = DEFAULT_SKIP_KEYS | {"id", "focus_ids", "question", "section", "kind", "title", "source_url", "issue_date",
-                                "sources", "url", "evidence_url", "evidence_title", "basis", "date"}
+                                "sources", "url", "evidence_url", "evidence_title", "basis", "date", "image"}
 CACHE_FORMAT_VERSION = 2
 
 
@@ -81,6 +81,8 @@ class UnitRunner:
             return cached
         try:
             options = {"timeout": self.timeout_for(unit.stage)} if self.timeout_for else {}
+            if unit.extra_read_dirs:
+                options["extra_read_dirs"] = unit.extra_read_dirs
             result = self.llm.generate_json(unit.prompt, models=unit.models, stage=unit.stage,
                                             validate=unit.validate, **options)
             # Also enforce the contract for third-party implementations of LLMClient.

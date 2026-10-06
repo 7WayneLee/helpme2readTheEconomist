@@ -80,6 +80,16 @@ def test_source_and_fact_alert_defaults_in_old_digests() -> None:
     assert old.fact_alerts == old.classifications["a"].sources == old.summaries["a"].sources == []
 
 
+def test_figure_notes_round_trip_and_old_digest_defaults() -> None:
+    digest = all_models()[-1]
+    digest.figure_notes = {"EPUB/synthetic.png": {"kind": "photo", "description_zh": "行人走在合成街道上。"}}
+    assert Digest.from_dict(digest.to_dict()).figure_notes == digest.figure_notes
+    old = digest.to_dict()
+    del old["figure_notes"]
+    assert Digest.from_dict(old).figure_notes == {}
+    assert Digest.from_dict(old).figure_notes is not Digest.from_dict(old).figure_notes
+
+
 def test_digest_focus_order_and_old_json(tmp_path: Path) -> None:
     digest = all_models()[-1]
     digest.focus_ids = ["third", "first", "second"]

@@ -124,7 +124,7 @@ def test_html_balance_escape_and_details(sample_digest: Digest, no_taiwan_digest
     assert parser.links and all(link.startswith("#") for link in parser.links)
     assert "&lt;script&gt;" in report and "&amp;" in report
     assert "prefers-color-scheme:dark" in report and 'lang="zh-TW"' in report
-    assert len([attrs for attrs in parser.details if "open" in attrs]) == 2
+    assert len([attrs for attrs in parser.details if "open" in attrs]) == (2 if no_taiwan else 3)
     assert '<details><summary>答案（點開）</summary>' in report
     assert "[1]" in report and "Synthetic quiz answer" in report
 

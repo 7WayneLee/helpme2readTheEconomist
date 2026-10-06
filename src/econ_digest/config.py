@@ -51,6 +51,7 @@ class ModelsConfig:
     edit: tuple[str, ...] = DEFAULT_MODELS
     ground: tuple[str, ...] = KEY_MODELS
     facts: tuple[str, ...] = KEY_MODELS
+    figures: tuple[str, ...] = DEFAULT_MODELS
 
 
 @dataclass(frozen=True)

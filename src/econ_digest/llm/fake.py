@@ -1,7 +1,8 @@
 """Deterministic in-process client for application tests."""
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from pathlib import Path
 from threading import Lock
 from typing import Any
 
@@ -17,7 +18,8 @@ class FakeLLMClient(JSONClient):
         self.calls: list[tuple[str, str, str]] = []
         self._calls_lock = Lock()
 
-    def _invoke(self, prompt: str, model: str, stage: str, timeout: float) -> Attempt:
+    def _invoke(self, prompt: str, model: str, stage: str, timeout: float,
+                extra_read_dirs: Sequence[str | Path] = ()) -> Attempt:
         with self._calls_lock:
             self.calls.append((prompt, model, stage))
         started = time.monotonic()

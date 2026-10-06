@@ -9,7 +9,7 @@ from html import escape
 from importlib.resources import files
 
 from ..models import Digest, Source
-from ..images import ArticleImages, ImageBlob, IssueImages, PositionedImage
+from ..images import ArticleImages, ImageBlob, IssueImages, PositionedImage, inline_images_allowed
 from ..taxonomy import TIERS
 from .common import (TAIWAN_TAG, Entry, clean_text, english_article, generation_time, merged_leader_titles,
                      metadata, ordered_brief, overview, sections, summary_fields, title,
@@ -44,7 +44,15 @@ ImageRenderer = Callable[..., str]
 
 
 def structure_html(values: list[str], inline: list[PositionedImage], render_image: ImageRenderer,
-                   alt: str) -> str:
+                   alt: str, figure_notes: dict[str, dict] | None = None) -> str:
+    def illustrated(blob: ImageBlob) -> str:
+        note = (figure_notes or {}).get(blob.name)
+        if note:
+            label = "圖表" if note["kind"] in {"chart", "map"} else "配圖"
+            description = note["description_zh"]
+            return render_image(blob, description, caption=f"▲ {label}：{description}")
+        return render_image(blob, alt)
+
     assignments: dict[int, list[ImageBlob]] = {}
     ranges = []
     for index, value in enumerate(values):
@@ -60,10 +68,10 @@ def structure_html(values: list[str], inline: list[PositionedImage], render_imag
     result = "<ol>"
     for index, value in enumerate(values):
         result += "<li>" + escape(value)
-        result += "".join(render_image(blob, alt) for blob in assignments.get(index, []))
+        result += "".join(illustrated(blob) for blob in assignments.get(index, []))
         result += "</li>"
     result += "</ol>"
-    return result + "".join(render_image(blob, alt) for blob in assignments.get(len(values), []))
+    return result + "".join(illustrated(blob) for blob in assignments.get(len(values), []))
 
 
 def article_html(digest: Digest, entry: Entry, images: IssueImages | None = None,
@@ -86,9 +94,9 @@ def article_html(digest: Digest, entry: Entry, images: IssueImages | None = None
     for label, values in fields:
         body += f"<h5>{label}</h5>"
         if label == "文章脈絡":
-            allowed = tier == "A" and (level == 1 or entry.article.id in (getattr(digest, "focus_ids", None) or []))
+            allowed = inline_images_allowed(tier, level, entry.article.id, digest.focus_ids)
             body += structure_html(values, selected.inline if allowed else [], render_image,
-                                   entry.classification.title_zh + " 插圖")
+                                   entry.classification.title_zh + " 插圖", digest.figure_notes)
         else:
             body += bullets(values) if len(values) > 1 else paragraph(values[0])
         if label == "對台灣的意涵":
@@ -98,7 +106,7 @@ def article_html(digest: Digest, entry: Entry, images: IssueImages | None = None
         body += paragraph(clean_text(entry.summary.leader_stance))
     # One-sentence entries have no empty disclosure, even when they have a Taiwan link.
     if body:
-        opened = " open" if tier in ("A", "B") else ""
+        opened = " open" if tier in ("A", "B") or level >= 1 else ""
         body = f"<details{opened}><summary>閱讀摘要</summary>" + body + "</details>"
     return '<article class="story">' + header + "<h5>一句話重點</h5>" + paragraph(headline[1][0]) + relation + body + "</article>"
 
