@@ -42,14 +42,27 @@ def figure_note(item: dict[str, Any]) -> dict[str, str]:
     kind = item.get("kind")
     if not isinstance(kind, str) or kind not in FIGURE_KINDS:
         raise ValueError("kind must be chart, map, photo or illustration")
+    alt = item.get("alt_zh")
+    if not isinstance(alt, str) or "社論" in alt:
+        raise ValueError("alt_zh must be text without the prohibited term")
+    alt = normalize_zh_tw(alt.strip())
+    if not 6 <= len(alt) <= 40:
+        raise ValueError("alt_zh requires 6–40 characters")
     description = item.get("description_zh")
     if not isinstance(description, str) or "社論" in description:
         raise ValueError("description_zh must be text without the prohibited term")
     description = normalize_zh_tw(description.strip())
-    minimum, maximum = (20, 180) if kind in {"chart", "map"} else (8, 60)
+    minimum, maximum = (20, 140) if kind in {"chart", "map"} else (8, 60)
     if not minimum <= len(description) <= maximum:
         raise ValueError(f"{kind} description_zh requires {minimum}–{maximum} characters")
-    return {"kind": kind, "description_zh": description}
+    note = {"kind": kind, "alt_zh": alt, "description_zh": description}
+    # An unusable takeaway must not hide a valid reading description.
+    takeaway = item.get("takeaway_zh")
+    if kind in {"chart", "map"} and isinstance(takeaway, str) and "社論" not in takeaway:
+        takeaway = normalize_zh_tw(takeaway.strip())
+        if 10 <= len(takeaway) <= 60:
+            note["takeaway_zh"] = takeaway
+    return note
 
 
 def figure_units(issue: Issue, classifications: dict[str, Classification],

@@ -19,7 +19,7 @@ INTERNATIONAL = (
     Site('bbc_asia', 'BBC', 'https://feeds.bbci.co.uk/news/world/asia/rss.xml'),
     Site('bbc_zh', 'BBC 中文', 'https://feeds.bbci.co.uk/zhongwen/trad/rss.xml'),
     Site('dw', 'DW 中文', 'https://rss.dw.com/rdf/rss-chi-all'),
-    Site('rfi', 'RFI 中文', 'https://www.rfi.fr/cn/rss'),
+    Site('rfi', 'RFI 中文', 'https://www.rfi.fr/tw/rss'),
     Site('guardian', 'The Guardian', 'https://www.theguardian.com/world/taiwan/rss'),
 )
 GOVERNMENT = (
