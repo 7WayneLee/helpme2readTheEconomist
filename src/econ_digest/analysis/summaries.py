@@ -9,7 +9,7 @@ from ..config import Config
 from ..facts import load_taiwan_facts
 from ..models import Article, ArticleSummary, Classification, Issue
 from ..taxonomy import TIER_ORDER
-from .prompts import Unit, first_words, make_unit, numbered_text, prompt_json, split_units
+from .prompts import Unit, first_words, make_unit, numbered_text, prompt_json, split_units, with_term_hints
 from .validation import object_items, validate_summary
 
 BATCH_LIMITS = {"A": 1, "B": 1, "C": 3, "D": 6, "E": 12}
@@ -32,7 +32,7 @@ def summary_payload(article: Article, classification: Classification, leader: Ar
     if leader:
         payload["leader"] = {"article_id": leader.id, "title": leader.title,
                               "text": numbered_text(leader.paragraphs)}
-    return payload
+    return with_term_hints(payload, "\n".join([article.title, article.rubric or "", *article.paragraphs]))
 
 
 def summary_units(issue: Issue, classifications: dict[str, Classification], config: Config, *,

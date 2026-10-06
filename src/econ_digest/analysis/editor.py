@@ -10,7 +10,7 @@ from ..models import ArticleSummary, Classification, Issue, WeekBrief
 from ..llm import run_parallel
 from ..zhtw import normalize_zh_tw
 from .cache import UnitRunner
-from .prompts import Unit, make_unit, prompt_json, split_units
+from .prompts import Unit, make_unit, prompt_json, split_units, with_term_hints
 from .validation import chinese_length, validate_headline
 
 # Known named entities are checked as complete strings, including common
@@ -105,10 +105,11 @@ def valid_headline(candidate: Any, inputs: dict[str, Any], title: str) -> bool:
 
 def editor_items(issue: Issue, classifications: dict[str, Classification],
                  summaries: dict[str, ArticleSummary], brief: WeekBrief | None) -> list[dict[str, Any]]:
-    result = [{"id": article.id, "title": article.title, "rubric": article.rubric,
+    result = [with_term_hints({"id": article.id, "title": article.title, "rubric": article.rubric,
                "title_zh": classifications[article.id].title_zh,
                "headline_zh": summaries[article.id].headline_zh if article.id in summaries else None,
-               "tier": classifications[article.id].tier}
+               "tier": classifications[article.id].tier},
+               "\n".join([article.title, article.rubric or "", *article.paragraphs]))
               for article in issue.articles if article.id in classifications
               and classifications[article.id].tier not in {"brief", "skip"}]
     if brief:

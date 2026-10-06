@@ -19,6 +19,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 econ_digest = ["prompts/*.md", "facts/*.md", "zhtw/*.tsv", "templates/*", "research/certs/*.pem"]
+"econ_digest.zhtw" = ["terms-NOTICE.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

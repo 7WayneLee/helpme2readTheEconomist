@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from string import Template
 from typing import Any, TypeVar
+
+from ..zhtw.terms import terminology_hint
 
 PROMPT_DIR = Path(__file__).resolve().parents[1] / "prompts"
 T = TypeVar("T")
@@ -45,17 +48,32 @@ def prompt_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
+def with_term_hints(payload: dict[str, Any], article_text: str) -> dict[str, Any]:
+    """Keep per-article references inside its input, and absent when unmatched."""
+    hint = terminology_hint(article_text)
+    return {**payload, "term_hints": hint} if hint else payload
+
+
+def editor_style(style: str) -> str:
+    """Retain every rule and replacement, omit examples and Markdown overhead."""
+    blacklist = []
+    for row in style.split("\n## 四、", 1)[0].splitlines():
+        if row.startswith("| **"):
+            columns = row.split("|")
+            blacklist.append(columns[1].strip() + " → " + columns[3].strip())
+    core = style.split("\n## 三、", 1)[0]
+    # The opening paragraph describes the role; _common.md and edit.md supply
+    # that same role. Rule sections, including all new conventions, remain.
+    core = core.split("\n\n", 1)[0] + "\n" + core[core.index("## 零、"):]
+    core = re.sub(r"（(?:例如|如|例)[^）]*）", "", core)
+    core = re.sub(r"(?m)^\s*(?:#{1,6} |\d+\. |[-*] |---\s*$)", "", core)
+    return (core + "\n翻譯腔替換：\n" + "\n".join(blacklist)).replace("**", "")
+
+
 def render_prompt(name: str, issue_date: str, **values: Any) -> tuple[str, str]:
     style = (PROMPT_DIR / "_style.md").read_text(encoding="utf-8")
     if name == "edit":
-        # Keep core rules and blacklist substitutions, omit table explanations
-        # and the long title examples: the full preamble exceeds 9 KB itself.
-        blacklist = []
-        for row in style.split("\n## 四、", 1)[0].splitlines():
-            if row.startswith("| **"):
-                columns = row.split("|")
-                blacklist.append(columns[1].strip() + " → " + columns[3].strip())
-        style = style.split("\n## 三、", 1)[0] + "\n翻譯腔替換：\n" + "\n".join(blacklist)
+        style = editor_style(style)
     common = (PROMPT_DIR / "_common.md").read_text(encoding="utf-8")
     if name == "figures":
         # Vision needs local image access; all text prompts retain their exact
