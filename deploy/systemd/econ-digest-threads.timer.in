@@ -1,0 +1,11 @@
+[Unit]
+Description=經濟學人導讀 Threads 發文定時器
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=@INTERVAL@min
+AccuracySec=1s
+Unit=econ-digest-threads.service
+
+[Install]
+WantedBy=timers.target

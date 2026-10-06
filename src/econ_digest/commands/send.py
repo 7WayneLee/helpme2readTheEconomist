@@ -33,6 +33,19 @@ SETUP_INSTRUCTIONS = ("尚未設定 Telegram：請在 ~/.config/econ-digest/env 
                       "再執行 econ-digest telegram-setup 設定 TELEGRAM_CHAT_ID。")
 
 
+def _enqueue_social(config: Config, directory: Path, log: Callable[[str], None]) -> None:
+    if not config.social.threads.enabled:
+        return
+    from ..social.queue import Queue, prepare_posts
+    try:
+        posts = prepare_posts(directory, config.social.threads,
+                              page_limit_bytes=config.telegraph.page_limit_bytes)
+        count = Queue(config.paths.data_dir).enqueue(posts)
+        log(f"Threads 佇列已加入 {count} 則貼文。")
+    except Exception as error:
+        log(f"Threads 加入佇列失敗（{type(error).__name__}）；本期已傳送，可稍後執行 social threads enqueue。")
+
+
 def _progress(path: Path, fingerprint: str, message_count: int, *, force: bool,
               telegraph: bool) -> dict:
     progress = {"fingerprint": fingerprint, "next_message": 0, "document_sent": False}
@@ -113,6 +126,8 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
     if not pages_only:
         state = load_state(config.paths.data_dir)
         if digest.issue_date in state["delivered"] and not force and not (dry_run and telegraph):
+            if not dry_run:
+                _enqueue_social(config, directory, log)
             log("本期已傳送；如需再次傳送，請加上 --force。")
             return 0
     pages_path = directory / "telegraph_pages.json"
@@ -246,6 +261,7 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
         if article:
             record_english(state, digest.issue_date, article, digest.english.reason_zh)
     save_state(config.paths.data_dir, state)
+    _enqueue_social(config, directory, log)
     log(f"已傳送 {len(messages)} 則訊息。")
     return 0
 

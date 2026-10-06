@@ -742,3 +742,84 @@ cp /tmp/twca.pem src/econ_digest/research/certs/twca-secure-ssl.pem
 5. 使用 `econ-digest analyze --plan` 檢視受影響單元，再按正常分析流程生成。改文風會使所有使用該前綴的單元失效；只改術語時，實際命中且提示文字改變的單元才失效。單純 `render` 會重新正體化與排版，不能令模型採用新的術語提示；若只改 `glossary.tsv`，仍可直接重新 render。
 
 本次有限校準使用資料副本，只有一個編輯區塊與兩個 C 級摘要的前後對照，至多六次模型呼叫；不執行整期分析或發布。實際新聞衍生的對照、術語使用判讀、tokens 與秒數保留在忽略的 `data/research/style-b/calibration/report.md`，公開文件只記錄方法與合成例。
+
+## Threads 文章排程
+
+Threads 功能預設停用。啟用後，完成 Telegram 傳送的期號會自動加入獨立佇列；已傳送期號再次執行 `send` 也能補建佇列。`send --dry-run`、`send --pages-only` 不會加入佇列。加入失敗不會撤回已完成的 Telegram 傳送，補齊公開封面或分頁後可手動 `enqueue`。
+
+### 帳號、Meta 應用程式與權杖
+
+1. 建立專用 Threads 帳號。在 [Meta 開發者平台](https://developers.facebook.com/apps/)建立應用程式，選取 **Access the Threads API** 使用案例；依[官方應用程式設定](https://developers.facebook.com/documentation/threads/get-started/create-an-app/)加入 `threads_content_publish`，保留必要的 `threads_basic`。本工具不需要讀取回覆或管理回覆權限。
+2. 在 **App roles → Roles → Add People → Threads Tester** 邀請該帳號，再登入 Threads 的 **Account Settings → Website permissions** 接受邀請。邀請接受後才授權。測試帳號可在開發模式使用；若開放給未具應用程式角色的其他帳號，須先完成 App Review 並發布應用程式。步驟見[官方入門文件](https://developers.facebook.com/documentation/threads/get-started/)。
+3. 設定 OAuth Redirect Callback URL，依[官方權杖授權流程](https://developers.facebook.com/documentation/threads/get-started/get-access-tokens-and-permissions/)用 Authorization Window 授予上述兩項 scope；在伺服器端交換授權碼取得短期權杖與 Threads user ID。短期權杖只有一小時，立即依[長期權杖文件](https://developers.facebook.com/documentation/threads/get-started/long-lived-tokens/)用 `GET /access_token`、`grant_type=th_exchange_token` 與 Threads App secret 換成 60 天長期權杖。App secret 只用於這次交換，不交給本工具，不放在公開儲存庫。
+4. 使用本機編輯器把 `THREADS_ACCESS_TOKEN`、`THREADS_USER_ID` 加入 `~/.config/econ-digest/env`，設 `chmod 600 ~/.config/econ-digest/env`。建議同時記錄 `THREADS_TOKEN_ISSUED_AT`，例如 `2026-10-06T08:00:00+08:00`；這是長期權杖取得時間，不能填未來時間。不要把權杖放進 shell 指令、TOML、截圖或日誌。
+5. 先用 `telegram-setup` 綁定私人聊天室供故障警示。警示只接受正整數私人 chat ID，從不使用 `TELEGRAM_CHANNEL_ID`。使用下方離線預覽檢閱，再啟用 `[social.threads] enabled = true` 並安裝定時器。
+
+### 設定與操作
+
+`config.example.toml` 的 `[social.threads]` 列出完整設定：
+
+| 鍵 | 預設 | 說明 |
+| --- | --- | --- |
+| `enabled` | `false` | 明確啟用才呼叫 Threads；預覽與加入佇列可在停用時執行 |
+| `sections` | 台灣、本週焦點、國際、財經・科技・文化 | 選取文章專區；即使設定順序不同，仍依原導讀順序排列 |
+| `window_start` / `window_end` | `08:00` / `22:00` | 含起訖時間；支援跨午夜 |
+| `timezone` | `Asia/Taipei` | 時段與每日上限使用的 IANA 時區 |
+| `interval_minutes` | `60` | 成功貼文間的最短間隔；修改後重新安裝定時器 |
+| `max_per_day` | `15` | 該時區的日曆日上限，含本期介紹；API 另有滾動 24 小時額度 |
+| `link_target` | `section` | 文章所屬 Telegraph 分頁（含續頁）；`weekly` 改連本週導讀 |
+| `hashtags` | `["#經濟學人導讀"]` | 1 至 2 個 # 標籤 |
+
+```sh
+.venv/bin/econ-digest social threads preview --issue 2026.10.03
+.venv/bin/econ-digest social threads enqueue --issue 2026.10.03
+.venv/bin/econ-digest social threads post-next --dry-run
+.venv/bin/econ-digest social threads status
+deploy/install-threads-timer.sh --print-units data/systemd-threads-preview
+systemd-analyze --user verify data/systemd-threads-preview/econ-digest-threads.service data/systemd-threads-preview/econ-digest-threads.timer
+deploy/install-threads-timer.sh
+```
+
+自訂設定檔時，安裝程式加 `--config /absolute/path/config.toml`，會把路徑寫入服務；執行 CLI 時使用 `econ-digest --config /absolute/path/config.toml social threads ...`。定時器在服務結束後等待 `interval_minutes` 再喚醒，第一次在使用者管理程序啟動約兩分鐘後執行；每次至多發布一則，睡眠或登出後不會一次補發積欠貼文。圖片與文字容器建立後依官方建議等待 30 秒再發布，因此實際時刻另含處理時間。定時器僅在使用者管理程序運作時執行，登出後持續運作需要自行啟用 lingering。
+
+```sh
+.venv/bin/econ-digest social threads pause
+systemctl --user disable --now econ-digest-threads.timer
+# 檢查問題並更新必要設定後：
+.venv/bin/econ-digest social threads resume
+systemctl --user enable --now econ-digest-threads.timer
+journalctl --user -u econ-digest-threads.service
+deploy/install-threads-timer.sh --uninstall
+```
+
+也可將 `enabled` 改回 `false`；恢復時要重新設為 `true`。`resume` 解除人工或授權暫停，重設退避與警示記號，保留所有貼文、容器與發布紀錄；它不能自行解決 `uncertain` 的發布結果。
+
+### 內容、長度與版權
+
+**文章貼文只使用我們自己的中文標題與摘要，不公開期刊原文或內文圖片；封面只附在本期介紹貼文。** 介紹使用已公開的 `site_publish.json` 封面網址，備援讀取 `telegram_progress.json` 或本機 `telegraph_cover.json` 的 `cover_url`。它包含刊期標題、封面故事標題、原期刊文章總數與本週導讀連結；文章總數包含未單獨發文的合併項目。正式加入佇列需要公開封面與已發布的 Telegraph 分頁；預覽缺資料時使用明確的本機預覽網址，不連網補資料。
+
+每篇有摘要的文章一則，合併的經濟學人立場文章不另發文。台灣文章首行使用 `【台灣】`，標題與網站相同。A–C 級取最多三項重點；A/B 未有 `key_points` 時，使用既有中文論證主張與證據，再以關鍵數據補足。超長時先移除完整的非必要重點，再縮短為完整句子；保留已包含的 `（推論）` 與台灣連結。若標題或不可拆的必要單句仍超長，停止準備並要求縮短中文摘要，避免截斷句子。
+
+[官方發布文件](https://developers.facebook.com/documentation/threads/posts/)於 2026-10-06 核對：一般文字上限 500 字元，emoji 特別按 UTF-8 位元組計算，不能單純用 Python `len()` 或把所有中文字按位元組算。官方沒有提供完整 emoji 計數表，因此本工具將符號、非 BMP 字元、emoji 選擇符與連接符保守按 UTF-8 位元組預算；中文與一般標點按字元，網址按完整長度。罕見非 emoji 符號可能被多算。圖片貼文不支援 `link_attachment`，介紹的連結放在文字內；純文字文章另指定所屬分頁為 link attachment。
+
+### 狀態、故障與復原
+
+佇列、跨期已發布紀錄、容器 ID、貼文 ID、時間戳記、退避與警示都放在忽略的 `data/social/threads_queue.json`。鍵固定為「期號＋文章 ID」，介紹使用 `intro`；重複 `enqueue` 或 `send --force` 不重置既有貼文。排程持有獨立檔案鎖，與加入佇列互斥；不要刪除狀態檔重新發文。
+
+| 情況 | 行為與處理 |
+| --- | --- |
+| 未啟用、時段外、未達間隔、達每日上限 | 不呼叫 Threads，等待下一次喚醒 |
+| API 額度不足 | 不建立容器，至少等待一小時再查 |
+| 429 / 網路 / API 錯誤 | 持久化 `Retry-After` 秒數或 HTTP 日期，搭配指數退避，最高基本退避六小時；較長的 Retry-After 仍完整遵守 |
+| 授權失效或 scope 不足 | 暫停整個佇列，只嘗試一次私人 Telegram 警示，重新授權後 `resume` |
+| 私人警示未設定或傳送失敗 | 保留 `unavailable` / `failed` 狀態並輸出不含憑證的訊息；同一暫停事件不自動重送以免洗版 |
+| 容器建立後程序中止 | 下一次沿用容器，查狀態後發布；未曾送出發布請求的過期容器可重新建立 |
+| 發布回應遺失 | 查容器狀態；已發布則用自己的最近貼文之精確文字與時間恢復唯一貼文 ID；找不到唯一結果或發布中的容器失效時標為 `uncertain` 並暫停，避免重複發布 |
+| 換成另一個 Threads 帳號 | 暫停，要求核對；既有發布紀錄不自動搬到新帳號 |
+| 佇列或權杖 JSON 毀損 | 不捨棄舊紀錄，不發布；先保留原檔並修復 |
+
+`uncertain` 必須先停定時器、核對 Threads 帳號與容器紀錄；確定已發布時，在本機佇列該筆填入正確的 `post_id`、`published_at` 並設 `status = "posted"`，同步 `last_posted_at` 後再 `resume`。若確認未發布，保留備份後才重設該筆的容器與狀態為 pending；不能以刪除整個佇列的方式重試。
+
+依[官方額度文件](https://developers.facebook.com/documentation/threads/overview/#rate-limiting)，API 為每個 profile 滾動 24 小時最多 250 則；每次先向 `threads_publishing_limit` 讀取實際 `quota_usage` 與 `quota_total`。依[容器疑難排解](https://developers.facebook.com/documentation/threads/troubleshooting/)，容器有 FINISHED、IN_PROGRESS、PUBLISHED、ERROR、EXPIRED 等狀態，未發布容器會在 24 小時後過期。
+
+權杖滿約 50 天時，排程先依[官方刷新流程](https://developers.facebook.com/documentation/threads/get-started/long-lived-tokens/#refresh-a-long-lived-token)呼叫 `GET https://graph.threads.net/refresh_access_token` 與 `grant_type=th_refresh_token`，再原子寫入 mode `600` 的 `data/social/threads_token.json`。快取較新時優先使用；env 換成更新的權杖與取得時間後會取代舊快取。沒有 `THREADS_TOKEN_ISSUED_AT` 時只能以 env 檔修改時間估計，首次觀測後保留這個基準，建議填實際取得時間避免延後刷新。長期權杖必須至少 24 小時、尚未過期才能刷新；過期或刷新失敗會暫停並附重新授權、換取長期權杖、更新私人 env、`resume` 的警示。CLI status 只顯示年齡與到期日期，從不輸出權杖或帳號 ID。
