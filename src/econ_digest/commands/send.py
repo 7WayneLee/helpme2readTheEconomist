@@ -19,7 +19,7 @@ from ..site.publish import publish_site
 from ..models import Digest, load_json, save_json
 from ..render.telegraph import (PREVIEW_URL, original_text_messages, render_telegraph,
                                 caption_length, summary_caption, summary_message, with_navigation)
-from ..state import AlreadyRunning, load_state, run_lock, save_state, utc_now
+from ..state import AlreadyRunning, load_state, record_english, run_lock, save_state, utc_now
 from ..telegraph import TelegraphClient, content_size
 from ..telegraph.publish import load_pages, publish_pages
 from ..telegram import TelegramClient
@@ -244,10 +244,7 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
     if digest.english:
         article = next((item for item in digest.issue.articles if item.id == digest.english.article_id), None)
         if article:
-            record = {"issue_date": digest.issue_date, "article_id": article.id, "section": article.section,
-                      "kind": article.kind, "title": article.title}
-            if record not in state["english_history"]:
-                state["english_history"].append(record)
+            record_english(state, digest.issue_date, article)
     save_state(config.paths.data_dir, state)
     log(f"已傳送 {len(messages)} 則訊息。")
     return 0

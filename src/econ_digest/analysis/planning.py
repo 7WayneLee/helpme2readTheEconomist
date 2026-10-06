@@ -10,7 +10,7 @@ from ..models import ArticleSummary, Classification, Issue, WeekBrief
 from .brief import brief_unit
 from .cache import read_cache
 from .classification import apply_tiers, classify_units, fallback_classification, fixed_classification, pair_unit
-from .english import english_candidates, guide_unit, pick_unit
+from .english import delivered_pick, english_candidates, guide_unit, pick_unit
 from .focus import apply_focus, fallback_focus, focus_unit
 from .figures import figure_units
 from .editor import edit_units
@@ -72,8 +72,11 @@ def plan_issue(issue: Issue, config: Config, *, workdir: Path,
         units.append(brief)
     cached_brief = read_cache(workdir, brief) if brief else None
     week_brief = WeekBrief.from_dict(cached_brief.data) if cached_brief and cached_brief.data else None
-    pick = pick_unit(issue, classifications, config, english_history)
-    if pick:
+    delivered, _ = delivered_pick(issue, config, english_history)
+    pick = None if delivered else pick_unit(issue, classifications, config, english_history)
+    if delivered:
+        units.append(guide_unit(issue, by_id[delivered["article_id"]], config))
+    elif pick:
         units.append(pick)
         cached = read_cache(workdir, pick)
         if cached and cached.data:

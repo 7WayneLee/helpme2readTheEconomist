@@ -17,6 +17,18 @@ def english_candidates(issue: Issue, config: Config) -> list[Article]:
             and config.english.min_words <= article.word_count <= config.english.max_words]
 
 
+def delivered_pick(issue: Issue, config: Config,
+                   history: list[dict[str, Any]] | None) -> tuple[dict[str, Any] | None, str | None]:
+    """Reuse the latest delivered selection only while it remains eligible."""
+    record = next((item for item in reversed(history or []) if item.get("issue_date") == issue.issue_date), None)
+    if record is None:
+        return None, None
+    identifier = record.get("article_id")
+    if not any(article.id == identifier for article in english_candidates(issue, config)):
+        return None, f"本期已送出的英文選文（文章 {identifier}）已不存在或不符合候選條件；重新選文。"
+    return {"article_id": identifier, "reason_zh": "沿用本期最近一次已送出的英文選文。"}, None
+
+
 def pick_unit(issue: Issue, classifications: dict[str, Classification], config: Config,
               history: list[dict[str, Any]] | None = None, *,
               exclude_ids: frozenset[str] = frozenset()) -> Unit | None:
@@ -24,6 +36,8 @@ def pick_unit(issue: Issue, classifications: dict[str, Classification], config: 
     if not candidates:
         return None
     ids = {article.id for article in candidates}
+    prior_history = [item for item in history or []
+                     if isinstance(item.get("issue_date"), str) and item["issue_date"] < issue.issue_date][-8:]
 
     def validate(data: dict[str, Any]) -> None:
         if not isinstance(data.get("article_id"), str) or data["article_id"] not in ids:
@@ -37,7 +51,7 @@ def pick_unit(issue: Issue, classifications: dict[str, Classification], config: 
                           "word_count": article.word_count, "first_paragraph": article.paragraphs[0] if article.paragraphs else "",
                           "taiwan_level": classifications[article.id].taiwan_level} for article in candidates]),
                      history=prompt_json([{key: item.get(key, "") for key in ("section", "kind", "title")}
-                                          for item in (history or [])[-8:]]))
+                                          for item in prior_history]))
     if unit.prompt_bytes > 90_000:
         raise ValueError("english_pick exceeds 90,000 prompt bytes")
     return unit

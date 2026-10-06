@@ -13,7 +13,7 @@ from econ_digest.config import Config, SecretsConfig, TelegramConfig
 from econ_digest.fetch import issue_directory
 from econ_digest.models import Digest, save_json
 from econ_digest.render import write_outputs
-from econ_digest.state import load_state, run_lock
+from econ_digest.state import load_state, run_lock, save_state
 from econ_digest.telegram import TelegramError
 
 
@@ -88,6 +88,21 @@ def test_delivered_idempotency_and_force(delivery_config: Config, prepared: tupl
     assert send.send_digest(delivery_config, force=True) == 0
     assert len(client.messages) == 6 and len(client.documents) == 2
     assert len(load_state(delivery_config.paths.data_dir)["english_history"]) == 1
+
+
+def test_send_replaces_all_same_issue_english_records(delivery_config: Config, delivery_digest: Digest,
+                                                    prepared: tuple[Path, FakeTelegram]) -> None:
+    selected = delivery_digest.issue.articles[0]
+    record = {"issue_date": delivery_digest.issue_date, "article_id": selected.id, "section": selected.section,
+              "kind": selected.kind, "title": selected.title}
+    earlier = {**record, "issue_date": "2026.09.26", "article_id": "previous"}
+    later = {**record, "issue_date": "2026.10.10", "article_id": "future"}
+    state = load_state(delivery_config.paths.data_dir)
+    state["english_history"] = [earlier, {**record, "article_id": "old-pick"}, later, record]
+    state["delivered"][delivery_digest.issue_date] = {"delivered_at": "synthetic timestamp", "message_count": 3}
+    save_state(delivery_config.paths.data_dir, state)
+    assert send.send_digest(delivery_config, force=True) == 0
+    assert load_state(delivery_config.paths.data_dir)["english_history"] == [earlier, later, record]
 
 
 @pytest.mark.parametrize("secrets", [SecretsConfig(), SecretsConfig(telegram_bot_token="synthetic-secret-token"),
