@@ -189,6 +189,54 @@ def test_undated_ltn_hit_requires_article_metadata(tmp_path):
     assert result[0].source.date == '2026-10-02' and result[0].excerpt == 'Synthetic excerpt'
 
 
+@pytest.mark.parametrize('site', DOMESTIC)
+def test_search_404_is_no_results_only_for_ltn(tmp_path, site):
+    calls = []
+    search = site.url.format(query='synthetic')
+
+    def opener(request, **kwargs):
+        calls.append(request.full_url)
+        if request.full_url.endswith('robots.txt'):
+            return io.BytesIO(b'User-agent: *\nAllow: /\n')
+        status = 404 if request.full_url == search else 403
+        raise HTTPError(request.full_url, status, 'synthetic', Message(), io.BytesIO(b'<html>No matches</html>'))
+
+    cna = CNAClient(tmp_path, opener=opener, sleep=lambda _: None, today=DAY)
+    client = ResearchClient(cna, ResearchConfig(), '2026.10.03')
+    adapter = next(a for a in client.domestic if a.site == site)
+    assert client._run(site.outlet, lambda: adapter.retrieve(['synthetic'])) == []
+    if site.key == 'ltn':
+        assert calls == ['https://search.ltn.com.tw/robots.txt', search]
+        assert not client.fetcher.errors and not client.fetcher.warnings
+        assert not client.notices(available=True) and not client.notices(available=False)
+    else:
+        assert calls[-1] == site.rss
+        assert site.outlet in client.notices(available=True)[0]
+
+
+@pytest.mark.parametrize('status', [200, 403, 500])
+def test_ltn_other_search_failures_keep_rss_fallback_and_warning(tmp_path, status):
+    site = DOMESTIC[2]
+    search = site.url.format(query='synthetic')
+    calls = []
+
+    def opener(request, **kwargs):
+        calls.append(request.full_url)
+        if request.full_url.endswith('robots.txt'):
+            return io.BytesIO(b'User-agent: *\nAllow: /\n')
+        if request.full_url == search and status == 200:
+            return io.BytesIO(b'<html>synthetic unparseable page</html>')
+        code = status if request.full_url == search else 403
+        raise HTTPError(request.full_url, code, 'synthetic', Message(), None)
+
+    cna = CNAClient(tmp_path, opener=opener, sleep=lambda _: None, today=DAY)
+    client = ResearchClient(cna, ResearchConfig(), '2026.10.03')
+    adapter = next(a for a in client.domestic if a.site == site)
+    assert client._run(site.outlet, lambda: adapter.retrieve(['synthetic'])) == []
+    assert calls == ['https://search.ltn.com.tw/robots.txt', search, site.rss]
+    assert '部分查證來源暫時無法連線或解析（自由）' in client.notices(available=True)[0]
+
+
 def test_rss_matching_english_keywords_top_three_and_feed_once(tmp_path):
     calls = []
     def opener(request, **kwargs):

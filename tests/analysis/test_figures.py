@@ -99,6 +99,17 @@ def test_image_hash_changes_only_affected_batch_cache_key(analysis_config: Confi
     assert not (analysis_config.paths.data_dir / "issues").exists()
 
 
+def test_prompt_checks_time_series_exceptions_and_prominent_rebounds(analysis_config: Config):
+    source, classes, summaries, images = inputs()
+    prompt = figure_units(source, classes, summaries, ["a1"], analysis_config,
+                          images=images, extract=False)[0].prompt
+    assert "時間序列有明顯例外時，不得宣稱整段期間（例如全年）或所有折線「皆」「均」「全部」" in prompt
+    assert "2025 年起大幅下滑" in prompt
+    assert "若有顯著尖峰或反彈，須明確交代" in prompt
+    assert "2026 年初短暫反彈後再度轉負" in prompt
+    assert "短暫且幅度小的波動仍省略" in prompt
+
+
 def test_figure_cache_survives_moving_data_directory(analysis_config: Config, tmp_path: Path):
     source, classes, summaries, images = inputs(5)
     original = figure_units(source, classes, summaries, ["a1"], analysis_config, images=images)
