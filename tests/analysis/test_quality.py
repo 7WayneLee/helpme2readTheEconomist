@@ -133,7 +133,7 @@ EDITOR_INPUT = {'id': 'a1', 'title': 'China and America seek an AI crisis hotlin
     ('美中AI危機溝通　12國拒絕合作', False),
     ('美中AI危機溝通　川普拒絕合作', False),
     ('美中AI危機溝通　巴西拒絕合作', False),
-    ('美中AI危機溝通　林允中拒絕合作', False),
+    ('美中AI危機溝通　林允中總統拒絕合作', False),
     ('美中AI危機專線，合作缺乏互信', False),
 ])
 def test_editor_title_validation(value: str, expected: bool) -> None:

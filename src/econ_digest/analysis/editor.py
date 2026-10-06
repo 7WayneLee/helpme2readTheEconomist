@@ -14,7 +14,7 @@ from .prompts import Unit, make_unit, prompt_json, split_units
 from .validation import chinese_length, validate_headline
 
 # Known named entities are checked as complete strings, including common
-# abbreviations; the character gate below conservatively catches unfamiliar names.
+# abbreviations; transliteration and role checks below catch unfamiliar names.
 _NAMES = tuple("川普 特朗普 普丁 習近平 賴清德 澤倫斯基 馬克宏 施凱爾 梅爾茨 納坦雅胡 莫迪 金正恩 高市早苗 卓榮泰 林佳龍 顧立雄 韓國瑜 黃國昌 蕭美琴 輝達 台積電 聯發科 鴻海 美國 中國 台灣 臺灣 日本 南韓 北韓 俄羅斯 烏克蘭 法國 英國 德國 印度 巴西 巴拉圭 海地 瓜地馬拉 貝里斯 墨西哥 芬蘭 以色列 伊朗 伊拉克 葉門 歐盟 北約 菲律賓 加拿大 澳洲 紐西蘭 新加坡 馬來西亞 印尼 泰國 越南 北京 上海 香港 白宮 東京 華府 鹿兒島 宏都拉斯 尼加拉瓜 諾魯 教廷 史瓦帝尼 帛琉 吐瓦魯".split())
 _ALIASES = {"美國": ("America", "American", "United States", "US", "U.S.", "USA"),
             "中國": ("China", "Chinese", "PRC"), "台灣": ("Taiwan", "Taiwanese"),
@@ -22,11 +22,15 @@ _ALIASES = {"美國": ("America", "American", "United States", "US", "U.S.", "US
             "台積電": ("TSMC", "Taiwan Semiconductor"), "輝達": ("Nvidia",),
             "川普": ("Trump",), "金正恩": ("Kim Jong Un",), "法國": ("France", "French"),
             "芬蘭": ("Finland", "Finnish"), "印度": ("India", "Indian")}
-_STYLE_CHARS = set("新聞民調研究報告經濟學人專欄立場作者主張指出分析認為首度首次創下新高低成長降低增加減少擴大縮小差距超越勝過偏好轉向改變變化政策政府國家企業產業市場商業金融貿易關稅出口進口供應鏈晶片半導體人工智慧科技資訊網路軟體發展安全軍事危機熱線通話溝通接聽應變機制缺乏互信建立盼擬恐將未仍已正再更最不無有是對在的與和及或因但使讓於從由為以到了中上下前後內外本此這其個多少兩各新舊大大小強弱難易快慢短長支持反對批評爭取抵禦防堵抗衡展現彰顯冷淡態度拒絕願意回應合作衝突爭議威脅成本壓力財政赤字紀律債券借貸殖利率攀升動盪政治民主選舉選民信仰宗教溫和保守左左右右派基本盤裂痕競爭翻身迎來挑戰問題機會機遇文化傳統節慶宣傳形象統戰影響全球世界國際區域地區地方首長中央市政廳堡壘防線公益慈善援助資金體系採訪記者團改革制度方案計畫措施活動會談峰會能源用電核廢料深層處置封存茶農抹茶增產低價反補貼課稅揚言祭報復軍艦商船空襲據點釀襲控遭獲拚揭陷飆示警反攻重挫破億萬千百十年月份日票席人元幣美元比例百分比程度數據結構原因結果核心關鍵最重要結論方案評估調整成局隱患埋變數平衡秩序歐洲美洲亞洲拉美中東非洲海空首座熱潮新貴底首次時刻面臨路徑供給需求短缺流行遊戲娛樂健身體育科學健康醫療環境生活藝術書籍影視電影音樂飲食旅遊運動森林工廠農業污染氣候暖化溫度燃料汽車電動車利率貸款負債房價勞工工作失業薪資物價價格通膨央行銀行投資債務償還退休儲蓄人口教育學校學生社會家庭夫婦兒童女人男性女性富豪貧富落差暴力犯罪法律法院判決規範限制管制解禁開放民主威權意識形態興起削弱保護徵收稅收收入支出預算削減制裁衰退萎縮風險效益繁榮效率生產銷售直言呼籲重返維持掌握樂觀悲觀看好反映爭奪備受質疑自動化霸權霸主忠誠力量崛起沒能能否可能可望須必需應該如何何處情勢局勢觀察動向焦點重點摘要" )
+# Transliteration characters are deliberately narrower than ordinary Chinese
+# vocabulary. 柏 and 南 also cover common two-character foreign-name spellings.
+_TRANSLITERATED_NAME = re.compile(
+    r"[阿艾安奧巴貝比波伯布查達德迪杜多恩法菲弗福蓋格戈哈赫霍基吉加賈傑卡凱科克庫"
+    r"拉萊蘭朗勞雷里利林魯倫羅洛馬麥曼梅米蒙莫默穆納尼紐諾歐帕佩皮普齊奇喬薩塞桑"
+    r"森沙史斯蘇索塔泰坦特提湯圖托瓦威韋維溫沃烏西希謝辛雅亞耶伊尤約澤扎詹柏南]{2,}"
+)
+_NAME_WITH_ROLE = re.compile(r"([\u3400-\u9fff]{2,4})(先生|女士|總統|總理|部長|執行長|主席)")
 _ATTRIBUTIONS = {"經濟學人", "經濟學人專欄", "經濟學人立場", "民調", "研究", "報告", "分析"}
-# These ordinary editing words add no named entities. Keep this vocabulary
-# separate from input facts so a new person or place still fails the name gate.
-_STYLE_CHARS.update("掀擊推引爆砸提狂謀癱瘓涉錄捨靠登若晤瘋帶雙")
 
 
 def _numbers(value: str) -> set[str]:
@@ -50,8 +54,13 @@ def _numbers(value: str) -> set[str]:
 def faithful_text(candidate: Any, inputs: dict[str, Any]) -> bool:
     if not isinstance(candidate, str) or not candidate.strip() or "社論" in candidate:
         return False
+    candidate = normalize_zh_tw(candidate)
     source = "\n".join(normalize_zh_tw(str(value)) for key, value in inputs.items()
                        if key in {"title", "rubric", "title_zh", "headline_zh", "text_zh"} and value is not None)
+    # Summary context is validation-only: it never changes editor prompts or
+    # their cache keys, and cannot license new English tokens.
+    english_source = source
+    source += "\n" + normalize_zh_tw(inputs.get("_summary_zh", ""))
     if not _numbers(candidate) <= _numbers(source):
         return False
     for name in _NAMES:
@@ -59,13 +68,14 @@ def faithful_text(candidate: Any, inputs: dict[str, Any]) -> bool:
             aliases = _ALIASES.get(name, ())
             if not any(re.search(r"\b" + re.escape(alias) + r"\b", source, re.I) for alias in aliases):
                 return False
-    english = set(re.findall(r"[A-Za-z][A-Za-z'-]*", source.lower())) | {"ai"}
+    english = set(re.findall(r"[A-Za-z][A-Za-z'-]*", english_source.lower())) | {"ai"}
     if not set(re.findall(r"[A-Za-z][A-Za-z'-]*", candidate.lower())) <= english:
         return False
-    # Rewriting may introduce ordinary editorial words; unfamiliar characters
-    # (often a new proper name) are rejected, keeping the previous text.
-    added = set(re.findall(r"[\u3400-\u9fff]", candidate)) - set(source) - _STYLE_CHARS
-    return not added
+    if any(match.group() not in source for match in _TRANSLITERATED_NAME.finditer(candidate)):
+        return False
+    if any(name not in source and role not in source for name, role in _NAME_WITH_ROLE.findall(candidate)):
+        return False
+    return True
 
 
 def valid_title(candidate: Any, inputs: dict[str, Any]) -> bool:
@@ -127,9 +137,21 @@ def edit_units(issue: Issue, classifications: dict[str, Classification], summari
                        max_items=10, max_bytes=9_000)
 
 
+def _summary_text(summary: ArticleSummary) -> str:
+    """Existing summary facts, without English quotes or diagnostic metadata."""
+    parts = [summary.headline_zh, summary.summary_zh, summary.background,
+             summary.stance, summary.leader_stance, *summary.key_points,
+             *summary.structure, *summary.key_data, *(quote.zh for quote in summary.quotes)]
+    if summary.argument:
+        parts.extend([summary.argument.claim, *summary.argument.evidence,
+                      *summary.argument.counterpoints, summary.argument.conclusion])
+    return "\n".join(part for part in parts if part)
+
+
 def apply_edits(data: dict[str, Any], inputs: list[dict[str, Any]], classifications: dict[str, Classification],
                 summaries: dict[str, ArticleSummary], brief: WeekBrief | None) -> None:
     by_id = {item["id"]: item for item in inputs}
+    summary_sources = {identifier: _summary_text(summary) for identifier, summary in summaries.items()}
     for item in data["items"]:
         original = by_id[item["id"]]
         if original["tier"] == "brief" and brief:
@@ -139,6 +161,9 @@ def apply_edits(data: dict[str, Any], inputs: list[dict[str, Any]], classificati
                 getattr(brief, group)[int(index)].text_zh = candidate
             continue
         identifier = item["id"]
+        companion = classifications[identifier].companion_id
+        original = {**original, "_summary_zh": "\n".join(
+            summary_sources.get(source_id, "") for source_id in (identifier, companion))}
         if (valid_title(item.get("title_zh"), original)
                 and re.sub(r"\W", "", item["title_zh"]) != re.sub(
                     r"\W", "", summaries[identifier].headline_zh if identifier in summaries else "")):
