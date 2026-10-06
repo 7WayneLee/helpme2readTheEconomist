@@ -77,11 +77,17 @@ def figure_units(issue: Issue, classifications: dict[str, Classification],
 
         def build(batch: list[ImageBlob]) -> Unit:
             names = tuple(blob.name for blob in batch)
+            cache_images = prompt_json([{"image": blob.name, "path": "<figures>/" + blob.name}
+                                        for blob in batch])
             unit = make_unit("figures", issue.issue_date, [article.id], config.llm.models.figures,
                              lambda data: validate_figures(data, names),
-                             images=prompt_json([{"image": blob.name, "path": str(paths[blob.name])}
-                                                 for blob in batch]))
+                             images=cache_images)
+            # Cache the template and portable image names; use absolute paths
+            # only in the prompt sent to the model and its read permissions.
             return replace(unit,
+                           cache_prompt=unit.prompt,
+                           prompt=unit.prompt.replace(cache_images, prompt_json([
+                               {"image": blob.name, "path": str(paths[blob.name])} for blob in batch])),
                            extra_read_dirs=tuple(dict.fromkeys(paths[blob.name].parent for blob in batch)),
                            image_hashes=tuple((blob.name, hashlib.sha256(blob.data).hexdigest()) for blob in batch))
 

@@ -2,14 +2,22 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ..config import Config
+from ..fetch import issue_directory
 from ..models import Article, Classification, Issue
 from .prompts import Unit, make_unit, numbered_text, prompt_json
 from .validation import text, validate_guide
 
 ENGLISH_KINDS = {"article", "leader", "briefing", "column", "by_invitation", "obituary"}
+
+
+def _delivered_reason(value: Any) -> str | None:
+    # W10 could persist this internal reuse note in digest.json. It is not a
+    # reader-facing selection reason, so do not recover it from either source.
+    return value if isinstance(value, str) and value.strip() and "沿用本期" not in value else None
 
 
 def english_candidates(issue: Issue, config: Config) -> list[Article]:
@@ -19,14 +27,26 @@ def english_candidates(issue: Issue, config: Config) -> list[Article]:
 
 def delivered_pick(issue: Issue, config: Config,
                    history: list[dict[str, Any]] | None) -> tuple[dict[str, Any] | None, str | None]:
-    """Reuse the latest delivered selection only while it remains eligible."""
+    """Reuse an eligible delivered selection with its original reader-facing reason."""
     record = next((item for item in reversed(history or []) if item.get("issue_date") == issue.issue_date), None)
     if record is None:
         return None, None
     identifier = record.get("article_id")
     if not any(article.id == identifier for article in english_candidates(issue, config)):
         return None, f"本期已送出的英文選文（文章 {identifier}）已不存在或不符合候選條件；重新選文。"
-    return {"article_id": identifier, "reason_zh": "沿用本期最近一次已送出的英文選文。"}, None
+    reason = _delivered_reason(record.get("reason_zh"))
+    if reason is None:
+        try:
+            saved = json.loads((issue_directory(config, issue.issue_date) / "digest.json").read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            saved = None
+        if isinstance(saved, dict) and saved.get("issue_date") == issue.issue_date:
+            english = saved.get("english")
+            if isinstance(english, dict) and english.get("article_id") == identifier:
+                reason = _delivered_reason(english.get("reason_zh"))
+    if reason is None:
+        return None, f"本期已送出的英文選文（文章 {identifier}）缺少選文理由，歷史紀錄與本期 digest.json 均無可用理由；重新選文。"
+    return {"article_id": identifier, "reason_zh": reason}, None
 
 
 def pick_unit(issue: Issue, classifications: dict[str, Classification], config: Config,

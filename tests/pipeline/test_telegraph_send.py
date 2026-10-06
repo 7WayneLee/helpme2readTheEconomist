@@ -251,6 +251,7 @@ def test_telegraph_send_summary_private_original_and_state(prepared_telegraph: t
     state = load_state(config.paths.data_dir)
     assert state["delivered"][delivery_digest.issue_date]["message_count"] == len(opener.messages)
     assert state["english_history"][0]["article_id"] == delivery_digest.english.article_id
+    assert state["english_history"][0]["reason_zh"] == delivery_digest.english.reason_zh
 
 
 def test_resume_private_message_failure_does_not_publish_or_repeat_summary(prepared_telegraph: tuple) -> None:

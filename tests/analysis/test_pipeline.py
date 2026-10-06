@@ -148,7 +148,7 @@ def test_latest_delivered_english_pick_skips_pick_model(analysis_config: Config,
     source = issue([article("a1", words=800), article("a2", words=800)])
     history = [{"issue_date": source.issue_date, "article_id": "a1"},
                {"issue_date": "2026.09.26", "article_id": "previous"},
-               {"issue_date": source.issue_date, "article_id": "a2"},
+               {"issue_date": source.issue_date, "article_id": "a2", "reason_zh": "論證清楚，適合練習條件句。"},
                {"issue_date": "2026.10.10", "article_id": "future"}]
     cache = tmp_path / "analysis"
     if cached_guide:
@@ -158,6 +158,7 @@ def test_latest_delivered_english_pick_skips_pick_model(analysis_config: Config,
     digest = analyze_issue(source, analysis_config, client, workdir=cache,
                            english_history=history, progress=progress.append)
     assert digest.english.article_id == "a2"
+    assert digest.english.reason_zh == history[2]["reason_zh"]
     assert not any(stage == "english_pick" for _, _, stage in client.calls)
     assert sum(stage == "english_guide" for _, _, stage in client.calls) == (0 if cached_guide else 1)
     assert ("english_guide：1 篇（快取）" in progress) == cached_guide
@@ -191,7 +192,7 @@ def test_weekly_analysis_passes_full_history_before_filtering(analysis_config: C
     source = issue([article("a1", words=800), article("a2", words=800)])
     previous = [{"issue_date": (date(2026, 7, 11) + timedelta(weeks=i)).strftime("%Y.%m.%d"),
                  "section": "Culture", "kind": "article", "title": f"History {i}"} for i in range(12)]
-    history = [*previous, *([{"issue_date": source.issue_date, "article_id": "a2"}] if delivered else []),
+    history = [*previous, *([{"issue_date": source.issue_date, "article_id": "a2", "reason_zh": "論證清楚。"}] if delivered else []),
                *[{"issue_date": "2026.10.10", "article_id": f"future-{i}"} for i in range(9)]]
     state = empty_state()
     state["english_history"] = history
@@ -231,7 +232,7 @@ def test_english_guide_failure_repicks_once_and_retains_reason(analysis_config: 
         return answer(prompt, model, stage)
 
     client = FakeLLMClient(responder)
-    history = [{"issue_date": source.issue_date, "article_id": "a0"}] if delivered else None
+    history = [{"issue_date": source.issue_date, "article_id": "a0", "reason_zh": "論證清楚。"}] if delivered else None
     digest = analyze_issue(source, config, client, workdir=tmp_path / "analysis", english_history=history)
     if not delivered:
         assert picks[0] == ["a0", "a1"]

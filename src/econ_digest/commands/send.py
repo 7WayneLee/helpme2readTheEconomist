@@ -244,7 +244,7 @@ def send_digest(config: Config, issue_spec: str = "latest", *, force: bool = Fal
     if digest.english:
         article = next((item for item in digest.issue.articles if item.id == digest.english.article_id), None)
         if article:
-            record_english(state, digest.issue_date, article)
+            record_english(state, digest.issue_date, article, digest.english.reason_zh)
     save_state(config.paths.data_dir, state)
     log(f"已傳送 {len(messages)} 則訊息。")
     return 0

@@ -67,6 +67,7 @@ def test_resume_after_middle_failure(delivery_config: Config, delivery_digest: D
     state = load_state(delivery_config.paths.data_dir)
     assert state["delivered"][delivery_digest.issue_date]["message_count"] == 3
     assert state["english_history"][0]["article_id"] == delivery_digest.english.article_id  # type: ignore[union-attr]
+    assert state["english_history"][0]["reason_zh"] == delivery_digest.english.reason_zh
 
 
 def test_resume_after_document_failure(delivery_config: Config, prepared: tuple[Path, FakeTelegram]) -> None:
@@ -102,7 +103,8 @@ def test_send_replaces_all_same_issue_english_records(delivery_config: Config, d
     state["delivered"][delivery_digest.issue_date] = {"delivered_at": "synthetic timestamp", "message_count": 3}
     save_state(delivery_config.paths.data_dir, state)
     assert send.send_digest(delivery_config, force=True) == 0
-    assert load_state(delivery_config.paths.data_dir)["english_history"] == [earlier, later, record]
+    assert load_state(delivery_config.paths.data_dir)["english_history"] == [
+        earlier, later, {**record, "reason_zh": delivery_digest.english.reason_zh}]
 
 
 @pytest.mark.parametrize("secrets", [SecretsConfig(), SecretsConfig(telegram_bot_token="synthetic-secret-token"),
