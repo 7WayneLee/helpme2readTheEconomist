@@ -61,6 +61,8 @@ def render_prompt(name: str, issue_date: str, **values: Any) -> tuple[str, str]:
         # source and hash, including the shared no-tools instruction.
         common = common.replace("不要使用任何工具，直接回答。",
                                 "只使用讀檔或讀圖工具開啟指定的圖片，不要使用其他工具。")
+        common = common.replace("較少見者首次寫中文譯名（English）。",
+                                "名稱有通用中文譯名時只用中文，沒有通用譯名時才保留英文。")
     source = style + "\n" + common + "\n" + (
         PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8")
     digest = hashlib.sha256(source.encode()).hexdigest()
