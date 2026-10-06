@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import random
 import re
 from importlib.resources import files
 
@@ -12,6 +13,155 @@ from econ_digest.models import ArticleSummary, Classification
 from econ_digest.zhtw import terms
 from econ_digest.zhtw.terms import Term
 from conftest import article, issue, payload
+
+
+def _slow_matching_terms(text: str, table: tuple[Term, ...]) -> tuple[Term, ...]:
+    """Reference copy of the original per-term regex/occupied-list matcher."""
+    selected: list[Term] = []
+    occupied: list[tuple[int, int]] = []
+    ordered = sorted(set(table), key=lambda term: (
+        -len(term.english.split()), -len(term.english), term.english.casefold()))
+    for term in ordered:
+        pattern = re.compile(r"(?<!\w)" + r"\s+".join(
+            re.escape(word) for word in term.english.split()) + r"(?!\w)", re.I)
+        matches = [match.span() for match in pattern.finditer(text)
+                   if not any(match.start() < end and match.end() > start for start, end in occupied)]
+        if matches:
+            selected.append(term)
+            occupied.extend(matches)
+            if len(selected) == terms.MAX_HINT_TERMS:
+                break
+    return tuple(selected)
+
+
+def _slow_hint(text: str, table: tuple[Term, ...]) -> str:
+    entries: list[str] = []
+    for term in _slow_matching_terms(text, table):
+        entry = f"{term.english} → {term.chinese}"
+        candidate = terms._LABEL + "；".join([*entries, entry]) + "\n" + terms._GUIDANCE
+        if len(candidate.encode("utf-8")) <= terms.MAX_HINT_BYTES:
+            entries.append(entry)
+    return terms._LABEL + "；".join(entries) + "\n" + terms._GUIDANCE if entries else ""
+
+
+@pytest.fixture
+def default_term_cache():
+    terms._default_terms.cache_clear()
+    yield
+    terms._default_terms.cache_clear()
+
+
+@pytest.mark.parametrize("text,english", [
+    ("TRADE\nEmbargo; embargo TRADE\tEMBARGO.", ("trade embargo", "embargo", "trade")),
+    ("alpha beta gamma delta", ("alpha beta", "beta gamma delta", "alpha", "gamma")),
+    ("omega alpha alpha alpha", ("omega alpha", "alpha alpha", "alpha")),
+    ("alpha beta gamma delta epsilon", ("alpha beta", "beta gamma delta", "delta epsilon", "epsilon")),
+    ("alpha beta gamma delta; alpha beta", ("alpha beta", "beta gamma delta", "alpha")),
+    ("alpha\t\n beta   gamma; ALPHA-beta", ("alpha beta", "beta gamma", "alpha-beta", "beta")),
+    ("rate rates prerate _rate rate_ 中文rate rate中文 rate-rate", ("rate", "rate-rate")),
+    ("İncome taX; ſtock market; Kelvin; ıncome TAX", ("income tax", "stock market", "kelvin")),
+    ("alpha beta gamma", ("alpha", "alpha  ", "alpha beta", "beta gamma", "beta")),
+    ("", ("", "alpha")),
+    ("!alpha? beta.", ("", "!alpha", "alpha", "beta", "?")),
+    ("", ()),
+])
+def test_matcher_and_hint_match_slow_reference(text, english):
+    table = tuple(Term(phrase, "合成概念") for phrase in english)
+    expected = _slow_matching_terms(text, table)
+    assert terms.matching_terms(text, table) == expected
+    assert terms.terminology_hint(text, table).encode() == _slow_hint(text, table).encode()
+    assert terms.matching_terms(text, tuple(reversed(table))) == _slow_matching_terms(text, tuple(reversed(table)))
+
+
+def test_randomized_overlaps_repetitions_case_and_caps_match_reference():
+    rng = random.Random(167)
+    words = ("alpha", "bravo", "charlie", "delta", "echo", "foxtrot")
+    for _ in range(80):
+        english = {" ".join(rng.choices(words, k=rng.randint(1, 4))) for _ in range(40)}
+        table = tuple(Term(phrase, "合成" * rng.choice((1, 5, 100))) for phrase in sorted(english))
+        chunks = [rng.choice(tuple(sorted(english))) for _ in range(35)]
+        chunks.extend(rng.choices(words, k=100))
+        rng.shuffle(chunks)
+        text = " ".join(chunks)
+        text = "".join(char.upper() if rng.randrange(3) == 0 else char for char in text)
+        text = text.replace(" ", "\t\n" if rng.randrange(2) else " ")
+        assert terms.matching_terms(text, table) == _slow_matching_terms(text, table)
+        assert terms.terminology_hint(text, table).encode() == _slow_hint(text, table).encode()
+
+
+def test_duplicate_english_translations_keep_original_priority():
+    table = (Term("alpha beta", "甲乙"), Term("alpha beta", "其他"), Term("beta", "乙"))
+    assert terms.matching_terms("alpha beta; beta", table) == _slow_matching_terms("alpha beta; beta", table)
+
+
+def test_default_table_is_read_once_and_explicit_path_can_refresh(tmp_path, monkeypatch, default_term_cache):
+    table = tmp_path / "terms.tsv"
+    table.write_text("alpha beta\t甲乙\n")
+    reads = []
+
+    class Resource:
+        def read_text(self, **kwargs):
+            reads.append(kwargs)
+            return table.read_text(**kwargs)
+
+    class Package:
+        def joinpath(self, name):
+            assert name == "terms.tsv"
+            return Resource()
+
+    monkeypatch.setattr(terms, "files", lambda _: Package())
+    original = terms.load_terms()
+    assert terms.load_terms() is original
+    table.write_text("charlie delta\t丙丁\n")
+    assert terms.load_terms() is original
+    assert len(reads) == 1
+    assert terms.load_terms(table) == (Term("charlie delta", "丙丁"),)
+    table.write_text("alpha beta\t甲乙\n")
+    assert terms.load_terms(table) == original
+
+
+def test_matching_cache_uses_text_and_entire_term_tuple(monkeypatch):
+    table = (Term("cache concept", "合成概念"),)
+    other = (Term("cache concept", "其他概念"),)
+    terms._matching_terms.cache_clear()
+    original_patterns = terms._patterns
+    scans = []
+
+    def track(table):
+        scans.append(table)
+        return original_patterns(table)
+
+    monkeypatch.setattr(terms, "_patterns", track)
+    assert terms.matching_terms("cache concept", table) == table
+    assert terms.matching_terms("".join(("cache ", "concept")), table) == table
+    assert scans == [table]
+    assert terms.matching_terms("cache concept", other) == other
+    assert terms.matching_terms("no concept", table) == ()
+    assert scans == [table, other, table]
+
+
+def test_scanning_stops_when_highest_priority_slots_are_fixed(monkeypatch):
+    table = tuple(Term(f"synthetic concept {i:02d}", "合成概念") for i in range(20))
+    ordered, pattern, buckets = terms._patterns(table)
+    scanned = []
+
+    class TrackingPattern:
+        def finditer(self, text):
+            for match in pattern.finditer(text):
+                scanned.append(match.start())
+                yield match
+
+    monkeypatch.setattr(terms, "_patterns", lambda _: (ordered, TrackingPattern(), buckets))
+    text = "; ".join(term.english for term in table) + "; " + ("synthetic concept 19; " * 100)
+    terms._matching_terms.cache_clear()
+    assert terms.matching_terms(text, table) == _slow_matching_terms(text, table) == table[:15]
+    assert len(scanned) == 16
+
+
+def test_later_higher_priority_term_replaces_an_earlier_capped_result():
+    table = tuple(Term(f"synthetic concept {i:02d}", "合成概念") for i in range(20))
+    text = "; ".join(term.english for term in reversed(table))
+    assert terms.matching_terms(text, table) == _slow_matching_terms(text, table) == table[:15]
 
 
 @pytest.fixture
@@ -106,7 +256,8 @@ def test_editor_still_splits_under_byte_cap(analysis_config, monkeypatch):
     assert all(unit.prompt_bytes <= 9_000 for unit in units)
 
 
-def test_missing_packaged_file_does_not_change_payload_or_prompt(tmp_path, monkeypatch, analysis_config):
+def test_missing_packaged_file_does_not_change_payload_or_prompt(tmp_path, monkeypatch, analysis_config,
+                                                               default_term_cache):
     monkeypatch.setattr(terms, "files", lambda _: tmp_path)
     original = {"text": "Trade embargo."}
     assert with_term_hints(original, original["text"]) is original
