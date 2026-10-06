@@ -40,7 +40,8 @@ def test_english_filter_and_history(analysis_config: Config) -> None:
 def test_plan_reuses_only_valid_latest_delivered_pick(analysis_config: Config, tmp_path: Path,
                                                      recorded_id: str) -> None:
     source = issue([article("a1", words=800), article("a2", words=800), article("a3", words=100)])
-    history = [{"issue_date": source.issue_date, "article_id": identifier} for identifier in ("a1", recorded_id)]
+    history = [{"issue_date": source.issue_date, "article_id": identifier, "reason_zh": "論證清楚。"}
+               for identifier in ("a1", recorded_id)]
     units, _ = plan_issue(source, analysis_config, workdir=tmp_path / "analysis", english_history=history)
     picks = [unit for unit in units if unit.stage == "english_pick"]
     guides = [unit for unit in units if unit.stage == "english_guide"]

@@ -25,6 +25,7 @@ class Unit:
     prompt_hash: str = ""
     extra_read_dirs: tuple[Path, ...] = ()
     image_hashes: tuple[tuple[str, str], ...] = ()
+    cache_prompt: str | None = None
 
     @property
     def prompt_bytes(self) -> int:
@@ -33,7 +34,7 @@ class Unit:
     @property
     def cache_key(self) -> str:
         identity = [self.stage, sorted(self.article_ids), self.tier, self.prompt_hash,
-                    list(self.models), self.prompt]
+                    list(self.models), self.prompt if self.cache_prompt is None else self.cache_prompt]
         # Keep every existing text-stage key unchanged.
         if self.image_hashes:
             identity.append(self.image_hashes)

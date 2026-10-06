@@ -139,6 +139,12 @@ def test_state_history_and_delivery_round_trip(tmp_path: Path, synthetic_article
     assert load_state(tmp_path) == state
 
 
+def test_state_history_keeps_delivered_reason(tmp_path: Path, synthetic_article: Article) -> None:
+    store = StateStore(tmp_path)
+    store.record_english("2026.10.03", synthetic_article, "文章論證清楚，適合練習條件句。")
+    assert store.load()["english_history"][0]["reason_zh"] == "文章論證清楚，適合練習條件句。"
+
+
 def test_state_store_replaces_legacy_duplicate_english_records(tmp_path: Path, synthetic_article: Article) -> None:
     store = StateStore(tmp_path)
     store.record_english("2026.09.26", synthetic_article)

@@ -2,6 +2,7 @@ from dataclasses import replace
 import hashlib
 import json
 from pathlib import Path
+import shutil
 
 import pytest
 
@@ -93,6 +94,54 @@ def test_image_hash_changes_only_affected_batch_cache_key(analysis_config: Confi
     assert original[0].cache_key != updated[0].cache_key
     assert original[1].cache_key == updated[1].cache_key
     assert not (analysis_config.paths.data_dir / "issues").exists()
+
+
+def test_figure_cache_survives_moving_data_directory(analysis_config: Config, tmp_path: Path):
+    source, classes, summaries, images = inputs(5)
+    original = figure_units(source, classes, summaries, ["a1"], analysis_config, images=images)
+    cache = analysis_config.paths.data_dir / "issues" / "te_2026.10.03" / "analysis"
+    client = FakeLLMClient(lambda prompt, *_: figure_response(prompt))
+    results = [UnitRunner(client, cache).run(unit) for unit in original]
+    assert len(client.calls) == 2
+
+    moved_data = tmp_path / 'another project "with quotes"' / "data"
+    shutil.copytree(analysis_config.paths.data_dir, moved_data)
+    moved_config = replace(analysis_config, paths=replace(analysis_config.paths, data_dir=moved_data))
+    moved = figure_units(source, classes, summaries, ["a1"], moved_config, images=images)
+    assert [unit.prompt for unit in original] != [unit.prompt for unit in moved]
+    assert [unit.extra_read_dirs for unit in original] != [unit.extra_read_dirs for unit in moved]
+    assert [unit.cache_key for unit in original] == [unit.cache_key for unit in moved]
+    for unit in moved:
+        for image in payload(unit.prompt, "圖片："):
+            assert Path(image["path"]).is_relative_to(moved_data)
+            assert Path(image["path"]).read_bytes().startswith(b"synthetic pixels")
+
+    warm = FakeLLMClient(lambda *_: pytest.fail("moving images must preserve the cache"))
+    moved_cache = moved_data / "issues" / "te_2026.10.03" / "analysis"
+    recovered = [UnitRunner(warm, moved_cache).run(unit) for unit in moved]
+    assert [result.data for result in recovered] == [result.data for result in results]
+    assert warm.calls == []
+
+
+def test_figure_cache_depends_on_names_models_and_template(analysis_config: Config, monkeypatch):
+    from econ_digest.analysis import prompts
+
+    source, classes, summaries, images = inputs()
+    original = figure_units(source, classes, summaries, ["a1"], analysis_config, images=images, extract=False)[0]
+    different_models = replace(analysis_config, llm=replace(analysis_config.llm,
+                               models=replace(analysis_config.llm.models, figures=("another-model",))))
+    assert original.cache_key != figure_units(source, classes, summaries, ["a1"], different_models,
+                                             images=images, extract=False)[0].cache_key
+    positioned = images.by_article["a1"].inline[0]
+    images.by_article["a1"].inline[0] = replace(positioned, image=replace(positioned.image, name="renamed.png"))
+    assert original.cache_key != figure_units(source, classes, summaries, ["a1"], analysis_config,
+                                             images=images, extract=False)[0].cache_key
+    images.by_article["a1"].inline[0] = positioned
+    render = prompts.render_prompt
+    monkeypatch.setattr(prompts, "render_prompt", lambda *args, **kwargs:
+                        (render(*args, **kwargs)[0] + "\n新增圖片說明規則。", "changed-template-hash"))
+    assert original.cache_key != figure_units(source, classes, summaries, ["a1"], analysis_config,
+                                             images=images, extract=False)[0].cache_key
 
 
 def test_text_unit_cache_identity_is_unchanged():

@@ -7,7 +7,7 @@ import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, TypedDict
+from typing import Iterator, NotRequired, TypedDict
 
 from .models import Article, save_json
 
@@ -31,6 +31,7 @@ class EnglishHistoryRecord(TypedDict):
     section: str
     kind: str
     title: str
+    reason_zh: NotRequired[str]
 
 
 class LastRunRecord(TypedDict):
@@ -81,12 +82,14 @@ def save_state(data_dir: str | Path, state: State) -> None:
     save_json(Path(data_dir) / "state.json", state)
 
 
-def record_english(state: State, issue_date: str, article: Article) -> None:
+def record_english(state: State, issue_date: str, article: Article, reason_zh: str | None = None) -> None:
     """Keep the last delivered pick as the sole record for this issue."""
     record: EnglishHistoryRecord = {
         "issue_date": issue_date, "article_id": article.id, "section": article.section,
         "kind": article.kind, "title": article.title,
     }
+    if reason_zh is not None:
+        record["reason_zh"] = reason_zh
     state["english_history"] = [item for item in state["english_history"]
                                 if item.get("issue_date") != issue_date] + [record]
 
@@ -124,9 +127,9 @@ class StateStore:
         state["delivered"][issue_date] = {"delivered_at": utc_now(), "message_count": message_count}
         self.save(state)
 
-    def record_english(self, issue_date: str, article: Article) -> None:
+    def record_english(self, issue_date: str, article: Article, reason_zh: str | None = None) -> None:
         state = self.load()
-        record_english(state, issue_date, article)
+        record_english(state, issue_date, article, reason_zh)
         self.save(state)
 
     def start_run(self, issue_date: str | None = None) -> None:
