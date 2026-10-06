@@ -89,7 +89,28 @@ class AnalysisConfig:
 
 @dataclass(frozen=True)
 class ResearchConfig:
-    cna_request_budget: int = 40
+    request_budget: int = 120
+    cna_request_budget: int = 120  # Deprecated alias, synchronised in __post_init__.
+    cna: bool = True
+    pts: bool = True
+    udn: bool = True
+    ltn: bool = True
+    bbc_asia: bool = True
+    bbc_zh: bool = True
+    dw: bool = True
+    rfi: bool = True
+    guardian: bool = True
+    mofa: bool = True
+    mnd: bool = True
+    president: bool = True
+    ey: bool = True
+    dgbas: bool = True
+    cec: bool = True
+
+    def __post_init__(self) -> None:
+        budget = self.cna_request_budget if self.request_budget == 120 else self.request_budget
+        object.__setattr__(self, "request_budget", budget)
+        object.__setattr__(self, "cna_request_budget", budget)
 
 
 @dataclass(frozen=True)
@@ -214,6 +235,11 @@ def _convert(value: Any, annotation: Any, key: str, base_dir: Path) -> Any:
 
 
 def _build(cls: type[T], data: dict[str, Any], prefix: str, base_dir: Path) -> T:
+    if cls is ResearchConfig and "cna_request_budget" in data:
+        logger.warning("research.cna_request_budget 已棄用，請改用 research.request_budget")
+        data = dict(data)
+        data.setdefault("request_budget", data["cna_request_budget"])
+        data["cna_request_budget"] = data["request_budget"]
     defaults = cls()
     hints = get_type_hints(cls)
     names = {f.name for f in fields(cls)} - {"secrets"}
@@ -249,8 +275,8 @@ def _build(cls: type[T], data: dict[str, Any], prefix: str, base_dir: Path) -> T
 def _validate(config: Config) -> None:
     if config.analysis.focus_count <= 0:
         _fail("analysis.focus_count", "必須大於零")
-    if config.research.cna_request_budget < 0:
-        _fail("research.cna_request_budget", "必須是非負整數")
+    if config.research.request_budget < 0:
+        _fail("research.request_budget", "必須是非負整數")
     if config.site.ssh_timeout_seconds <= 0:
         _fail("site.ssh_timeout_seconds", "必須大於零")
     if config.site.enabled:

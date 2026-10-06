@@ -1,1 +1,1 @@
-"""Small public-news evidence retrieval using the standard library."""
+"""Approved news and government evidence, shared polite retrieval and short caches."""

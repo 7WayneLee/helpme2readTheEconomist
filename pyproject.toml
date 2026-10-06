@@ -18,7 +18,7 @@ econ-digest = "econ_digest.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-econ_digest = ["prompts/*.md", "facts/*.md", "zhtw/*.tsv", "templates/*"]
+econ_digest = ["prompts/*.md", "facts/*.md", "zhtw/*.tsv", "templates/*", "research/certs/*.pem"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

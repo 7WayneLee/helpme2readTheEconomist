@@ -59,14 +59,14 @@ def test_stage_timeouts_config_and_runner(tmp_path: Path) -> None:
 
 
 def test_cna_budget_config(tmp_path):
-    assert Config().research.cna_request_budget == 40
+    assert Config().research.cna_request_budget == 120
     path = tmp_path / 'config.toml'
     for budget in (0, 15):
         path.write_text(f'[research]\ncna_request_budget = {budget}\n')
         assert load_config(path).research.cna_request_budget == budget
     for invalid in ('-1', 'true', '2.5'):
         path.write_text(f'[research]\ncna_request_budget = {invalid}\n')
-        with pytest.raises(ConfigError, match='research.cna_request_budget'):
+        with pytest.raises(ConfigError, match=r'research.(cna_)?request_budget'):
             load_config(path)
 
 

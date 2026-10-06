@@ -7,7 +7,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from ..models import Article, ArticleSummary, BriefItem, Classification, Digest, Source
-from ..research.cna import cna_url
+from ..research.parsers import source_url
 from ..taxonomy import CATEGORIES, CATEGORY_SHORT_LABELS, TAIWAN_LEVELS, TIER_ORDER
 
 TAIWAN_TAG = "【台灣相關】"
@@ -17,7 +17,7 @@ def source_labels(sources: list[Source]) -> list[tuple[str, str]]:
     result = []
     seen: set[str] = set()
     for source in sources:
-        url = cna_url(source.url)
+        url = source_url(source.url, source.outlet)
         if url and url not in seen:
             result.append((clean_text(f"{source.outlet} {source.date.replace('-', '/')}〈{source.title}〉"), url))
             seen.add(url)

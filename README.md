@@ -36,7 +36,7 @@
   - [處理管線流程](#處理管線流程)
   - [模組職責地圖](#模組職責地圖)
   - [模型路由與管線階段（Model Routing & Pipeline Stages）](#模型路由與管線階段model-routing--pipeline-stages)
-  - [中央社證據檢索機制（CNA Research）](#中央社證據檢索機制cna-research)
+  - [多來源證據檢索（Research）](#多來源證據檢索research)
   - [台灣事實清單維護（Fact Sheet Maintenance）](#台灣事實清單維護fact-sheet-maintenance)
 - [安裝](#安裝)
 - [Telegram、Telegraph 與頻道設定](#telegramtelegraph-與頻道設定)
@@ -101,7 +101,7 @@
    - 「本週要聞速覽」：收錄該期 "The world this week" 政治與商業要聞，台灣相關要聞以「【台灣相關】」標記並置頂呈現。
 2. **台灣**（`taiwan`）：
    - 獨立成頁！收錄台灣專區報導（台灣關聯層級 T1 至 T3）之深度解析與詳細摘要。
-   - 台灣陳述與意涵下方均標註客觀查證出處（如「依據：中央社 YYYY/MM/DD〈標題〉」超連結）。
+   - 台灣陳述與意涵下方均標註客觀查證出處（如「依據：來源名稱 YYYY/MM/DD〈標題〉」超連結）。
 3. **本週焦點**（`focus`）：
    - 獨立成頁之國際核心專題深度解析（詳見下方說明）。
 4. **國際**（`international`）：
@@ -125,7 +125,7 @@
 - **專業用詞規範**：內文一律使用「**經濟學人立場**」與「**作者主張**」，絕不使用「社論」字眼。
 - **無附錄**：報告不設冗長的附錄章節。
 - **簡短條目無收合開關**：一句話簡短摘要（Tier E 等單句條目）直接展示內容，不加入多餘的「閱讀摘要」收合開關（disclosure toggle）。
-- **具體查證出處標註**：台灣專區與涉台報導之關聯陳述或意涵下方，一律附上至多 3 筆「依據：中央社 YYYY/MM/DD〈標題〉」外部來源超連結（此標註行見於私人網站、HTML 報告、Markdown 報告與 Telegraph 頁面，Telegram 聊天室訊息則省略以維持版面簡潔）。
+- **具體查證出處標註**：台灣專區與涉台報導之關聯陳述或意涵下方，一律附上至多 3 筆「依據：來源名稱 YYYY/MM/DD〈標題〉」外部來源超連結（此標註行見於私人網站、HTML 報告、Markdown 報告與 Telegraph 頁面，Telegram 聊天室訊息則省略以維持版面簡潔）。
 
 ### 圖片配置規範（Telegraph 公開頁面 vs 私人網站）
 
@@ -194,7 +194,7 @@ output/
 1. **頂部麵包屑導覽（Breadcrumb）**：各分頁頂部呈現「[所有期別](../index.html) › 本期期別（如 2026/10/03 號）」，標示網站階層並便於隨時返回歷史封存首頁或本期首頁。
 2. **置頂黏性章節分頁籤（Sticky Section Tabs）**：置頂橫向分頁導覽列（包含「要聞」、「台灣」、「焦點」、「國際」、「財經科技文化」、「英文」），隨頁面滾動固定於頂部，當前所在頁面高亮標示（`aria-current="page"`），便於單手滑動切換。
 3. **頁尾章節切換連結（Previous / Next Links）**：各章節底部提供「‹ 前一章節」與「後一章節 ›」切換按鈕，方便讀者順暢依序通讀全刊導讀。
-4. **具體查證出處標註**：在台灣專區與相關文章之「與台灣的關聯」或「對台灣的意涵」段落下方，精準附上至多 3 筆「依據：中央社 YYYY/MM/DD〈標題〉」外部查證連結。
+4. **具體查證出處標註**：在台灣專區與相關文章之「與台灣的關聯」或「對台灣的意涵」段落下方，精準附上至多 3 筆「依據：來源名稱 YYYY/MM/DD〈標題〉」外部查證連結。
 5. **閱讀摘要預設展開**：台灣專區所有文章的「閱讀摘要」均預設展開，包含 C 級文章；其他專區依原有規則僅展開 A、B 級摘要。單檔 HTML 報告的台灣文章亦同。
 
 ### 私人網站發布（Private Site Publishing）
@@ -351,7 +351,7 @@ author_email = "you@example.com"
    - 台灣關聯陳述或意涵**必須直接源自報導的「主要主題」（MAIN subject）**。
    - 嚴禁透過報導中僅順帶提及的次要事件進行連鎖推論（Chaining through passing mentions）——報導順帶提及之事件所引發的後續效應，既非該文章之台灣連結，亦不得作為「對台灣的意涵」。
 4. **「對台灣的意涵」選填化**：「對台灣的意涵」（`taiwan_implications`）為選填項目（0–3 筆），僅在具備充分事實基礎或外部證據時才撰寫；若無實質依據則完全留空，絕不湊數或牽強附會。
-5. **查證出處標註行**：在私人網站、HTML 報告、Markdown 報告與 Telegraph 頁面中，台灣關聯陳述與意涵下方均附上至多 3 筆「依據：中央社 YYYY/MM/DD〈標題〉」超連結（Telegram 聊天室訊息不加來源行，保持簡潔）。
+5. **查證出處標註行**：在私人網站、HTML 報告、Markdown 報告與 Telegraph 頁面中，台灣關聯陳述與意涵下方均附上至多 3 筆「依據：來源名稱 YYYY/MM/DD〈標題〉」超連結（Telegram 聊天室訊息不加來源行，保持簡潔）。
 
 ### 本週焦點機制
 
@@ -440,7 +440,7 @@ author_email = "you@example.com"
 | `src/econ_digest/analysis/grounding.py` | 台灣關聯查證（`ground_queries`、`ground`）與事實清單每週時效檢查（`facts`）。 |
 | `src/econ_digest/analysis/focus.py` | 評選本週 3 篇關鍵國際焦點專文並升級為 Tier A。 |
 | `src/econ_digest/analysis/figures.py` | 以圖片像素產生私人 HTML 圖說，獨立快取並保留無說明的原圖備援。 |
-| `src/econ_digest/research/cna.py` | 檢索中央社（CNA）新聞客觀證據、精確 URL 日期解析、禮貌頻寬限制與短摘錄快取。 |
+| `src/econ_digest/research/` | 核准新聞與政府證據、robots、共同請求上限、TLS 中繼憑證與短摘錄快取。 |
 | `src/econ_digest/facts/` | 具體日期與出處之台灣核心現況事實清單（`taiwan.md`）與載入器（`__init__.py`）。 |
 | `src/econ_digest/render/` | Markdown、HTML 報告、Telegraph 頁面節點與 Telegram 訊息切塊。 |
 | `src/econ_digest/images.py` | 自 EPUB 提取封面、題圖、內文圖表、漫畫與要聞配圖。 |
@@ -481,14 +481,47 @@ author_email = "you@example.com"
 4. **每週預期執行時間（Expected Runtime）**：
    相較於全 Flash 輕量管線，引入深度解析與外部中央社檢索後，每週分析耗時有所增加。依據 2026-10-06 實測數據，僅針對 `edit`、`ground` 與 `facts` 階段呼叫模型之重跑即耗時約 37 分鐘（其中 `edit` 包含 17 個區塊在 Gemini Flash 上以 parallel=2 執行，耗時約 30 分鐘，共消耗約 803k tokens；相較於早期 Opus 單區塊需 240–560 秒大幅提速）；若加上 2026-10-05 實測全新期別的前期階段（classify、pair、focus、summaries、brief、english 約 31 分鐘模型時間），整期管線預期執行耗時約落在 **45–60 分鐘**。Systemd 服務預設已配置 3 小時逾時上限（`TimeoutStartSec=3h`），緩衝充足無須額外調整。
 
-### 中央社證據檢索機制（CNA Research）
+### 多來源證據檢索（Research）
 
-系統透過 `src/econ_digest/research/cna.py` 與中央通訊社（CNA）進行客觀事實檢索，嚴格遵守以下防護機制：
-- **網址路徑日期精確解析**：中央社新聞發布日期一律自新聞 URL 路徑直接解析（`/news/[a-z]+/(\d{8})\d+\.aspx$`，提取 `YYYYMMDD`），**絕不依賴搜尋引擎摘要呈現之可能錯誤日期**。
-- **禮貌頻率限制與退避重試（Polite Rate Limit & Backoff）**：對中央社發起的 HTTP 請求間隔至少保持 **2.5 秒**（`REQUEST_INTERVAL = 2.5`）。若遇 HTTP 429 或 503 錯誤，會依標頭 `Retry-After`（支援秒數或 HTTP 日期）或指數退避（2.5 秒、5 秒、10 秒）自動重試至多 3 次。
-- **每次分析請求上限（Request Budget）**：每次分析設定 40 次 HTTP 請求上限（`cna_request_budget = 40`）；達標後停止對外發送請求，記錄警告通知（`中央社每次分析請求上限（40 次）已達；後續查證僅使用快取。`）並切換為僅使用本機快取查證。
-- **短摘錄快取與效期（Cache TTL）**：檢索結果僅提取新聞標題與前兩段（至多 200 字）純文字客觀證據，快取於 `data/research/`（由 `.gitignore` 排除）。搜尋結果快取效期為 7 天，文章短摘錄快取效期為 30 天，最多保留最近 500 筆，自動輪替淘汰。
-- **連線失敗優雅備援**：若中央社網路逾時或連線中斷，系統自動記錄警告（`中央社暫時無法連線；台灣關聯改以原文、事實檔與已取得的證據查證。`），流程持續進行，不會中斷崩潰。
+台灣關聯與每週事實檔檢查使用 `src/econ_digest/research/` 的核准來源；`[research]` 各來源預設啟用，可將下表的設定鍵改為 `false`。
+
+| 來源／設定鍵 | 存取方式 |
+| --- | --- |
+| 中央社 `cna` | 站內搜尋與文章前兩段；發布日期取自新聞網址；robots 禁止搜尋時改用政治 RSS（目前 robots 禁止此搜尋路徑）。 |
+| 公視新聞網 `pts` | 站內搜尋；robots 禁止或搜尋無法解析時改用 `newsfeed.xml` RSS（目前 robots 禁止搜尋）。 |
+| 聯合新聞網 `udn` | 站內搜尋的 HTML 日期與標題，必要時讀取文章日期；無法解析時改用要聞 RSS。已檢查公開搜尋頁與載入腳本，未採用未確認的 JSON API。 |
+| 自由時報 `ltn` | 站內搜尋的 HTML；相對時間不當發布日期，須讀取文章發布中繼資料。備援政治 RSS 目前回應 403，會列出警告。 |
+| BBC News Asia `bbc_asia`、BBC 中文繁體 `bbc_zh`、DW 中文 `dw`、RFI 中文 `rfi`、The Guardian Taiwan `guardian` | 官方 RSS，每次分析各抓取一次（包含快取）；用中文搜尋詞及原文標題、rubric、台灣訊號中的英文關鍵字比對，國際來源合計每篇最多 3 筆。摘錄為 RSS description，最多 200 字元。 |
+| 外交部 `mofa`、國防部 `mnd`、總統府 `president`、行政院 `ey`、主計總處 `dgbas`、中選會 `cec` | 官方最新新聞或公告列表；國防部包含新聞稿與共機動態，中選會讀取首頁公告區的 Nuxt 公開資料。事實檔檢查全部納入；關聯查證只納入關鍵字相符的項目。 |
+
+聯合與自由並用以平衡政治評價。事實優先採用中央社、公視與政府第一手公告；媒體評論、學者判斷或 The Diplomat 類型分析須保留發言者歸屬。聯合與自由的評價若有分歧，提示詞要求並列來源；政府的評價也不等同客觀事實。每篇合併證據後去除近似標題與重複網址，最多 12 筆，id 在該篇內唯一，ground 提示詞仍限制 90 KB。出處行列明來源，例如「依據：公視 2026/09/30〈標題〉」，最多 3 行。
+
+- **日期與時效**：日期只取網站頁面、官方列表、RSS 或新聞網址，不取外部搜尋引擎。搜尋最多回溯出刊日之前 365 天，RSS 為出刊日前 14 天，排除出刊日後的項目。政府列表最多回溯 365 天，保留較久前公布的正式統計。即時 RSS 可能已不含舊期別的報導，零筆相符不代表該來源無相關新聞。
+- **禮貌與共同上限**：使用 `econ-digest/0.1 (Taiwan news evidence; limited requests)`，同主機每次 HTTP 請求間隔至少 2.5 秒，預設逾時 15 秒。429／503 尊重秒數或 HTTP 日期的 Retry-After，至少按 2.5、5、10 秒退避，最多重試 3 次。全部來源、robots、重新導向及重試共用每次分析 `request_budget = 120`；0 表示只讀快取。舊 `cna_request_budget` 仍可作已棄用別名；兩者並存時以 `request_budget` 為準。
+- **robots**：每個搜尋主機先檢查 robots.txt，快取 24 小時；禁止或無法確認時不請求搜尋頁，改用該站 RSS 並寫日誌。robots 404 代表沒有該檔案；403、逾時或驗證失敗不視為允許。
+- **快取**：只存日期、標題、網址與至多 200 字元的短摘錄，不存完整報導；位於被忽略的 `data/research/`。搜尋 7 天、文章摘錄 30 天、RSS／政府列表 6 小時、robots 24 小時。中央社保留既有 500 筆輪替；共用快取最多 1,000 筆。讀取快取時仍重新檢查時效。
+- **失敗備援**：部分來源失敗時警告列出來源名稱，繼續使用成功取得的證據；全部無法連線時維持原文、事實檔與快取的備援規則。未查證推論不得保留，原文已實質討論台灣的事實關聯仍保留。事實檔只提醒已完成的變動，政府公告為最強依據；`evidence_title` 必須逐字等於引用證據中的標題，程式不自動改寫事實檔。
+- **存取限制**：Reuters 回應 401、AP 回應 403，未納入來源；VOA、RFA、中國時報也未獲核准。搜尋結果、短摘錄與有限的最新列表並不涵蓋完整歷史，無法取代人工查證。
+
+政府 TLS 驗證沿用系統根憑證，僅對外交部、總統府與主計總處另載入套件中的 `research/certs/twca-secure-ssl.pem`，絕不關閉憑證或主機名稱驗證。中繼憑證為 **TWCA Secure SSL Certification Authority**，發行者是系統信任的 **TWCA Global Root CA**；有效期至 2030-10-16。2026-10-06 以葉憑證 AIA 的 CA Issuers 位址取得，SHA-256 指紋為 `1A:2C:75:FD:09:6E:04:99:E9:FF:6A:C7:4E:52:6F:61:EA:AE:3E:DF:C8:C2:EA:44:36:FE:E0:C2:4D:8B:7D:0E`，三站葉憑證均以系統根憑證驗證成功。
+
+中繼憑證更新流程（需要 OpenSSL；在臨時目錄操作後再檢查差異）：
+
+```sh
+openssl s_client -connect www.mofa.gov.tw:443 -servername www.mofa.gov.tw -showcerts </dev/null > /tmp/mofa-chain.pem
+openssl x509 -in /tmp/mofa-chain.pem -noout -issuer -ext authorityInfoAccess
+# 另對 www.president.gov.tw、www.stat.gov.tw 重做以上檢查；以當次葉憑證 AIA 為準。
+python3 -c 'from urllib.request import urlopen; from pathlib import Path; Path("/tmp/twca.crt").write_bytes(urlopen("https://sslserver.twca.com.tw/cacert/secure_sha2_2023G3.crt", timeout=15).read())'
+openssl x509 -inform DER -in /tmp/twca.crt -out /tmp/twca.pem
+openssl x509 -in /tmp/twca.pem -noout -subject -issuer -dates -fingerprint -sha256
+openssl verify /tmp/twca.pem
+openssl verify -untrusted /tmp/twca.pem /tmp/mofa-chain.pem
+# 每站都須 OK；確認是公開中繼憑證、系統信任的根及合理有效期後才替換。
+cp /tmp/twca.pem src/econ_digest/research/certs/twca-secure-ssl.pem
+.venv/bin/python -m pytest tests/research -q
+```
+
+若發行者或 AIA 改變，請重新取得新的中繼憑證、驗證三站完整鏈並更新指紋與有效期；不可把葉憑證或任意自簽根加入信任庫。
 
 ### 台灣事實清單維護（Fact Sheet Maintenance）
 
