@@ -24,6 +24,7 @@
   - [發布失敗備援機制（Fallback）](#發布失敗備援機制fallback)
   - [私有 GitHub 儲存庫備份（Backup）](#私有-github-儲存庫備份backup)
 - [Telegram 頻道推播（Channel）](#telegram-頻道推播channel)
+- [Threads 文章排程](#threads-文章排程)
 - [新聞編輯與寫作風格（House Style）](#新聞編輯與寫作風格house-style)
 - [分類與摘要深度](#分類與摘要深度)
   - [台灣關聯層級（Taiwan Levels）與外部查證約束](#台灣關聯層級taiwan-levels與外部查證約束)
@@ -157,7 +158,7 @@
 > [!IMPORTANT]
 > 1. **公開連結性質**：Telegraph 頁面任何持有 URL 者皆可瀏覽，且 Telegraph API 不支援刪除頁面，僅支援以 Token 原地編輯更新。
 > 2. **版權嚴格隔離**：期刊內文插圖、圖表、地圖、漫畫與英文原文全文，**一律僅於私人網站（`output/`）與本機報告中流通**，絕不上傳至 Telegraph。
-> 3. **隨機不可臆測網址**：系統以隨機雜湊路徑配置 Telegraph 頁面，防範外部爬取。請勿將個人 Telegraph 導讀連結公開散布。
+> 3. **隨機網址**：系統以隨機雜湊路徑配置 Telegraph 頁面。選用 Threads 發文後，選定專區的導讀連結會隨貼文公開；私人圖文網站與原文仍由帳密保護。
 
 ---
 
@@ -825,3 +826,18 @@ output/                         # 網站發布與封存目錄（gitignored，備
 .venv/bin/pytest
 ```
 系統內建測試配額守衛（Quota Guard），防止自動測試時意外消耗共享 API 配額。
+
+## Threads 文章排程
+
+選用的 Threads 發文預設停用。完成每期傳送後，可依「台灣 → 本週焦點 → 國際 → 財經・科技・文化」逐篇發布自己的中文摘要，第一則為附封面的本期介紹；合併文章不重複發文。**文章貼文為純文字，不公開期刊原文與內文圖片；封面只附在本期介紹貼文。** 每則保守預算 500 字元，保留完整句子、推論標示與台灣關聯。
+
+先依 [Meta 官方入門文件](https://developers.facebook.com/documentation/threads/get-started/)建立專用 Threads 帳號、Access the Threads API 應用程式，邀請並接受 Threads Tester；授予 `threads_basic` 與 `threads_content_publish`，依[長期權杖文件](https://developers.facebook.com/documentation/threads/get-started/long-lived-tokens/)換取 60 天權杖。把 `THREADS_ACCESS_TOKEN`、`THREADS_USER_ID` 與取得時間 `THREADS_TOKEN_ISSUED_AT` 放在 mode 600 的 `~/.config/econ-digest/env`；不要放在 TOML 或公開儲存庫。完整帳號設定、權限、所有設定鍵與故障處理見[維運手冊](docs/operations.md#threads-文章排程)。
+
+```sh
+.venv/bin/econ-digest social threads preview --issue 2026.10.03
+.venv/bin/econ-digest social threads enqueue --issue 2026.10.03
+.venv/bin/econ-digest social threads post-next --dry-run
+.venv/bin/econ-digest social threads status
+```
+
+預覽與試跑完全離線。檢閱後在 `config.toml` 的 `[social.threads]` 設 `enabled = true`，再執行 `deploy/install-threads-timer.sh`。預設台北時間 08:00–22:00、每 60 分鐘至多一則、每天最多 15 則；API 額度另查詢官方端點。刷新權杖與佇列均保存在忽略的 `data/social/`。`social threads pause` / `resume` 可暫停及恢復，停用定時器使用 `systemctl --user disable --now econ-digest-threads.timer`；授權或刷新失敗會暫停並只嘗試一次私人 Telegram 警示。

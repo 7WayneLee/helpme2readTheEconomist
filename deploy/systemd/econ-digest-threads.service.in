@@ -1,0 +1,11 @@
+[Unit]
+Description=經濟學人導讀 Threads 排程發文
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@REPO@
+EnvironmentFile=-%h/.config/econ-digest/env
+ExecStart="@EXEC_REPO@/.venv/bin/econ-digest" @CONFIG_ARGS@social threads post-next
+UMask=0077

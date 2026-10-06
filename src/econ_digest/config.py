@@ -163,12 +163,33 @@ class BackupConfig:
 
 
 @dataclass(frozen=True)
+class ThreadsConfig:
+    enabled: bool = False
+    sections: tuple[str, ...] = ("台灣", "本週焦點", "國際", "財經・科技・文化")
+    window_start: str = "08:00"
+    window_end: str = "22:00"
+    timezone: str = "Asia/Taipei"
+    interval_minutes: int = 60
+    max_per_day: int = 15
+    link_target: str = "section"
+    hashtags: tuple[str, ...] = ("#經濟學人導讀",)
+
+
+@dataclass(frozen=True)
+class SocialConfig:
+    threads: ThreadsConfig = field(default_factory=ThreadsConfig)
+
+
+@dataclass(frozen=True)
 class SecretsConfig:
     telegram_bot_token: str | None = field(default=None, repr=False)
     telegram_chat_id: str | None = field(default=None, repr=False)
     telegram_channel_id: str | None = field(default=None, repr=False)
     github_token: str | None = field(default=None, repr=False)
     telegraph_access_token: str | None = field(default=None, repr=False)
+    threads_access_token: str | None = field(default=None, repr=False)
+    threads_user_id: str | None = field(default=None, repr=False)
+    threads_token_issued_at: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -185,6 +206,7 @@ class Config:
     report: ReportConfig = field(default_factory=ReportConfig)
     site: SiteConfig = field(default_factory=SiteConfig)
     backup: BackupConfig = field(default_factory=BackupConfig)
+    social: SocialConfig = field(default_factory=SocialConfig)
     secrets: SecretsConfig = field(default_factory=SecretsConfig, repr=False)
 
 
@@ -273,6 +295,35 @@ def _build(cls: type[T], data: dict[str, Any], prefix: str, base_dir: Path) -> T
 
 
 def _validate(config: Config) -> None:
+    from datetime import time
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    threads = config.social.threads
+    for name in ("window_start", "window_end"):
+        value = getattr(threads, name)
+        if not re.fullmatch(r"\d{2}:\d{2}", value):
+            _fail(f"social.threads.{name}", "必須是 HH:MM 格式")
+        try:
+            time.fromisoformat(value)
+        except ValueError:
+            _fail(f"social.threads.{name}", "時間無效")
+    if threads.window_start == threads.window_end:
+        _fail("social.threads.window_end", "必須與開始時間不同")
+    try:
+        ZoneInfo(threads.timezone)
+    except (ValueError, ZoneInfoNotFoundError):
+        _fail("social.threads.timezone", "時區無效")
+    for name in ("interval_minutes", "max_per_day"):
+        if getattr(threads, name) <= 0:
+            _fail(f"social.threads.{name}", "必須大於零")
+    if any(section not in ThreadsConfig().sections for section in threads.sections):
+        _fail("social.threads.sections", "必須是台灣、本週焦點、國際或財經・科技・文化")
+    if threads.link_target not in ("section", "weekly"):
+        _fail("social.threads.link_target", "必須是 section 或 weekly")
+    if not 1 <= len(threads.hashtags) <= 2 or any(
+        not re.fullmatch(r"#[\w]+", tag) for tag in threads.hashtags
+    ):
+        _fail("social.threads.hashtags", "必須是 1 至 2 個以 # 開頭的標籤")
     if config.analysis.focus_count <= 0:
         _fail("analysis.focus_count", "必須大於零")
     if config.research.request_budget < 0:
@@ -340,7 +391,8 @@ def _validate(config: Config) -> None:
 def _load_secrets() -> SecretsConfig:
     values = dict(os.environ)
     env_path = Path(values.get("ECON_DIGEST_ENV_FILE", "~/.config/econ-digest/env")).expanduser()
-    names = {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN", "TELEGRAPH_ACCESS_TOKEN", "TELEGRAM_CHANNEL_ID"}
+    names = {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "GITHUB_TOKEN", "TELEGRAPH_ACCESS_TOKEN", "TELEGRAM_CHANNEL_ID",
+             "THREADS_ACCESS_TOKEN", "THREADS_USER_ID", "THREADS_TOKEN_ISSUED_AT"}
     try:
         mode = env_path.stat().st_mode
     except FileNotFoundError:
@@ -374,6 +426,9 @@ def _load_secrets() -> SecretsConfig:
         telegram_channel_id=values.get("TELEGRAM_CHANNEL_ID") or None,
         github_token=values.get("GITHUB_TOKEN") or None,
         telegraph_access_token=values.get("TELEGRAPH_ACCESS_TOKEN") or None,
+        threads_access_token=values.get("THREADS_ACCESS_TOKEN") or None,
+        threads_user_id=values.get("THREADS_USER_ID") or None,
+        threads_token_issued_at=values.get("THREADS_TOKEN_ISSUED_AT") or None,
     )
 
 
@@ -400,5 +455,5 @@ def load_config(path: str | Path | None = None) -> Config:
         paths=config.paths, source=config.source, llm=config.llm, tiers=config.tiers,
         analysis=config.analysis, research=config.research,
         english=config.english, telegram=config.telegram, telegraph=config.telegraph, report=config.report,
-        site=config.site, backup=config.backup, secrets=_load_secrets(),
+        site=config.site, backup=config.backup, social=config.social, secrets=_load_secrets(),
     )
