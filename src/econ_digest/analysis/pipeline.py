@@ -24,6 +24,7 @@ from .english import guide_unit, pick_unit
 from .editor import edit_digest
 from .grounding import check_facts, ground_digest
 from .focus import apply_focus, fallback_focus, focus_unit
+from .figures import describe_figures
 from .prompts import Unit
 from .summaries import summary_model, summary_units
 
@@ -227,9 +228,11 @@ def analyze_selected(issue: Issue, config: Config, llm: LLMClient, *, workdir: P
         raise AnalysisError(f"分析失敗比例超過 30%（{failed_units}/{runner.total_units}）；請稍後重試。")
     if only_tier is not None or limit is not None:
         warnings.append("本次僅執行指定範圍的摘要，供提示詞調整使用。")
+    # Captions are optional and never enter another prompt or the failure gate.
+    figure_notes = describe_figures(issue, classifications, summaries, focus_ids, config, runner, warnings)
     digest = Digest(issue.issue_date, datetime.now(timezone.utc).isoformat(), issue, classifications, summaries,
                     week_brief, english, sorted(runner.stats, key=lambda stat: (stat.stage, stat.model)), warnings,
-                    focus_ids=focus_ids, fact_alerts=fact_alerts)
+                    focus_ids=focus_ids, fact_alerts=fact_alerts, figure_notes=figure_notes)
     # Source articles and diagnostic strings are not model-authored Chinese.
     digest = Digest.from_dict(normalize_tree(digest.to_dict(), skip_keys=SKIP_KEYS | {"issue", "warnings", "llm_calls"}))
     findings = [finding for value in _zh_strings(digest.to_dict()) for finding in lint_zh_tw(value)]

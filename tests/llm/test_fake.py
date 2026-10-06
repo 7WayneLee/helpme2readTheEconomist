@@ -1,6 +1,7 @@
 import threading
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -15,6 +16,12 @@ def test_fake_returns_dict_and_records_calls() -> None:
     assert client.calls == [("request", "primary", "summaries")]
     assert result.total_tokens == 0
     assert result.duration_seconds >= 0
+
+
+def test_fake_accepts_extra_read_dirs_without_reading_them(tmp_path: Path) -> None:
+    client = FakeLLMClient(lambda *_: {"ok": True})
+    assert client.generate_json("synthetic prompt", models=["fake"],
+                                extra_read_dirs=[tmp_path / "does-not-exist"]).data == {"ok": True}
 
 
 def test_debug_prompt_stays_on_one_log_line(caplog: pytest.LogCaptureFixture) -> None:

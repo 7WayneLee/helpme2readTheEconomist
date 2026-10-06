@@ -34,6 +34,7 @@ english = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 英語學習
 edit = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 標題與要聞編修
 ground = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"] # 台灣關聯查證
 facts = ["claude-opus-4-6-thinking", "gemini-3.8-flash-high"] # 台灣事實檔更新提醒
+figures = ["gemini-3.8-flash-high", "claude-sonnet-4-6"] # 深度解析內文插圖與圖表說明
 
 [tiers]
 cover_companion_min = "B" # 封面經濟學人立場對應報導至少達到的深度

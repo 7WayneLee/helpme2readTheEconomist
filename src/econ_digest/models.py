@@ -244,3 +244,4 @@ class Digest(JsonModel):
     warnings: list[str] = field(default_factory=list)
     focus_ids: list[str] = field(default_factory=list)
     fact_alerts: list[dict] = field(default_factory=list)
+    figure_notes: dict[str, dict] = field(default_factory=dict)

@@ -12,6 +12,7 @@ from .cache import read_cache
 from .classification import apply_tiers, classify_units, fallback_classification, fixed_classification, pair_unit
 from .english import english_candidates, guide_unit, pick_unit
 from .focus import apply_focus, fallback_focus, focus_unit
+from .figures import figure_units
 from .editor import edit_units
 from .grounding import facts_unit, grounding_units, query_units
 from .prompts import Unit
@@ -63,7 +64,8 @@ def plan_issue(issue: Issue, config: Config, *, workdir: Path,
             summaries.update({item["article_id"]: ArticleSummary.from_dict({**item, "tier": unit.tier})
                               for item in cached.data["articles"]})
         else:
-            summaries.update({identifier: ArticleSummary(identifier, unit.tier, "摘要尚待產生")
+            summaries.update({identifier: ArticleSummary(identifier, unit.tier, "摘要尚待產生",
+                                                         structure=["脈絡尚待產生"] if unit.tier == "A" else [])
                               for identifier in unit.article_ids})
     brief = brief_unit(issue, config)
     if brief:
@@ -88,4 +90,5 @@ def plan_issue(issue: Issue, config: Config, *, workdir: Path,
     units.extend(grounding_units(issue, ground_ids, classifications, summaries,
                                   {identifier: [] for identifier in ground_ids}, config))
     units.append(facts_unit(issue.issue_date, [], config))
+    units.extend(figure_units(issue, classifications, summaries, focus_ids, config, extract=False))
     return units, estimated

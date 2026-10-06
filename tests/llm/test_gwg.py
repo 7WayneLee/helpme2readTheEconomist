@@ -107,6 +107,19 @@ def test_structured_output_is_preferred(scenario: Any) -> None:
     assert client.generate_json("prompt", models=["primary"]).data == {"nested": {"ok": True}}
 
 
+def test_extra_read_dirs_are_repeated_and_preserved_on_fallback(scenario: Any, tmp_path: Path) -> None:
+    client, path = scenario([failure("quota reached", code=429), success()])
+    directories = [tmp_path / "images with spaces", str(tmp_path / "other")]
+    client.generate_json("prompt", models=["primary", "fallback"], extra_read_dirs=directories)
+    calls = json.loads(path.read_text())["calls"]
+    assert len(calls) == 2
+    for call in calls:
+        args = call["args"]
+        assert [args[index + 1] for index, value in enumerate(args) if value == "--add-dir"] == list(map(str, directories))
+        assert "--dangerously-skip-permissions" not in args
+        assert "--mode" not in args
+
+
 @pytest.mark.parametrize("error,code,status,kind", [
     ("FAILED_PRECONDITION: User location is not supported for the API use.", 400, "FAILED_PRECONDITION", "location"),
     ("RESOURCE_EXHAUSTED: Individual quota reached. Resets in 34h11m29s.", 429, "RESOURCE_EXHAUSTED", "quota"),

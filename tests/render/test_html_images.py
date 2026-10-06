@@ -10,6 +10,7 @@ from econ_digest.images import load_issue_images
 from econ_digest.models import Digest, save_json
 from econ_digest.render import render_html, render_markdown
 from econ_digest.cli import build_parser
+from econ_digest.site.build import build_site
 
 
 def encoded(data: bytes) -> str:
@@ -51,6 +52,52 @@ def test_illustration_alt_text_escaped(sample_digest: Digest, illustrated_epub: 
     images.by_article["sample-1"] = images.by_article["normal"]
     sample_digest.classifications["sample-1"].title_zh = '測試 " < &'
     assert 'alt="測試 &quot; &lt; &amp; 插圖"' in render_html(sample_digest, images)
+
+
+@pytest.mark.parametrize("kind,label", [("chart", "圖表"), ("map", "地圖"),
+                                       ("photo", "配圖"), ("illustration", "配圖")])
+def test_inline_caption_and_alt_in_report_and_site(sample_digest: Digest, illustrated_epub: Path,
+                                                 tmp_path: Path, kind: str, label: str) -> None:
+    images = load_issue_images(illustrated_epub)
+    images.by_article["sample-1"] = images.by_article["normal"]
+    blob = images.by_article["sample-1"].inline[0].image
+    description = '合成圖片 "甲" 與 <乙> & 背景。'
+    sample_digest.figure_notes[blob.name] = {"kind": kind, "description_zh": description}
+    report = render_html(sample_digest, images)
+    built = build_site(sample_digest, tmp_path / "site", images=images)
+    site = built.pages["taiwan"].read_text()
+    for html in (report, site):
+        assert f'<figcaption>▲ {label}：合成圖片 &quot;甲&quot; 與 &lt;乙&gt; &amp; 背景。</figcaption>' in html
+        assert 'alt="合成圖片 &quot;甲&quot; 與 &lt;乙&gt; &amp; 背景。" loading="lazy"' in html
+        story = html.split('<article class="story">')[1].split("</article>")[0]
+        assert story.index("文章脈絡") < story.index("<figcaption>") < story.index("</details>")
+        assert story.index('alt="台灣晶片展望 插圖"') < story.index("閱讀摘要")
+
+
+def test_no_note_preserves_inline_image_without_caption(sample_digest: Digest, illustrated_epub: Path,
+                                                       tmp_path: Path) -> None:
+    images = load_issue_images(illustrated_epub)
+    images.by_article["sample-1"] = images.by_article["normal"]
+    site = build_site(sample_digest, tmp_path / "site", images=images).pages["taiwan"].read_text()
+    for html in (render_html(sample_digest, images), site):
+        story = html.split('<article class="story">')[1].split("</article>")[0]
+        assert story.count('<figure>') == 2
+        assert "<figcaption>" not in story
+        assert story.count('alt="台灣晶片展望 插圖"') == 2
+
+
+def test_tier_c_taiwan_summary_is_open_but_level_zero_is_closed(sample_digest: Digest, tmp_path: Path) -> None:
+    report = render_html(sample_digest)
+    built = build_site(sample_digest, tmp_path / "site")
+    taiwan = built.pages["taiwan"].read_text()
+    world = built.pages["world"].read_text()
+    for html in (report, taiwan):
+        story = html.split('<h4>供應鏈間接影響</h4>')[1].split("</article>")[0]
+        assert '<details open><summary>閱讀摘要</summary>' in story
+    for html in (report, world):
+        story = html.split('<h4>美國政策</h4>')[1].split("</article>")[0]
+        assert '<details><summary>閱讀摘要</summary>' in story
+        assert '<details open>' not in story
 
 
 @pytest.mark.parametrize("enabled,exists", [(True, True), (False, True), (True, False)])

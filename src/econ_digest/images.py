@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Collection
 from html.parser import HTMLParser
 import mimetypes
 from pathlib import Path, PurePosixPath
@@ -36,6 +37,27 @@ class ArticleImages:
 class IssueImages:
     cover: ImageBlob | None = None
     by_article: dict[str, ArticleImages] = field(default_factory=dict)
+
+
+def inline_images_allowed(tier: str, taiwan_level: int, article_id: str,
+                          focus_ids: Collection[str]) -> bool:
+    """Share the private article-context image scope with analysis."""
+    return tier == "A" and (taiwan_level == 1 or article_id in focus_ids)
+
+
+def figure_image_path(directory: Path, blob: ImageBlob, *, extract: bool = False) -> Path:
+    """Preserve the renderer's image name within the private extraction directory."""
+    name = PurePosixPath(blob.name)
+    root = directory.resolve()
+    if name.is_absolute() or ".." in name.parts:
+        raise ValueError("Image name must stay inside the figures directory")
+    path = root.joinpath(*name.parts).resolve()
+    if not path.is_relative_to(root) or path == root:
+        raise ValueError("Image path must stay inside the figures directory")
+    if extract:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(blob.data)
+    return path
 
 
 class _Tags(HTMLParser):
