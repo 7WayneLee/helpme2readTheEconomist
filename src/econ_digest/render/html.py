@@ -8,6 +8,7 @@ from collections.abc import Callable
 from html import escape
 from importlib.resources import files
 
+from ..analysis.figures import FIGURE_KINDS, figure_note
 from ..models import Digest, Source
 from ..images import ArticleImages, ImageBlob, IssueImages, PositionedImage, inline_images_allowed
 from ..taxonomy import TIERS
@@ -47,10 +48,27 @@ def structure_html(values: list[str], inline: list[PositionedImage], render_imag
                    alt: str, figure_notes: dict[str, dict] | None = None) -> str:
     def illustrated(blob: ImageBlob) -> str:
         note = (figure_notes or {}).get(blob.name)
-        if note:
-            label = {"chart": "圖表", "map": "地圖"}.get(note["kind"], "配圖")
-            description = note["description_zh"]
-            return render_image(blob, description, caption=f"▲ {label}：{description}")
+        if isinstance(note, dict):
+            # Digests made before the short-alt format keep their original layout.
+            if "alt_zh" not in note and "takeaway_zh" not in note:
+                if (isinstance(note.get("kind"), str) and note["kind"] in FIGURE_KINDS
+                        and isinstance(note.get("description_zh"), str) and note["description_zh"]):
+                    label = {"chart": "圖表", "map": "地圖"}.get(note["kind"], "配圖")
+                    description = note["description_zh"]
+                    return render_image(blob, description, caption=f"▲ {label}：{description}")
+            else:
+                try:
+                    note = figure_note(note)
+                except ValueError:
+                    return render_image(blob, alt)
+                description = note["description_zh"]
+                if note["kind"] in {"chart", "map"}:
+                    label = {"chart": "圖表", "map": "地圖"}[note["kind"]]
+                    takeaway = note.get("takeaway_zh")
+                    caption = f"▲ {label}｜" + (f"重點：{takeaway}　" if takeaway else "") + description
+                else:
+                    caption = f"▲ 配圖：{description}"
+                return render_image(blob, note["alt_zh"], caption=caption)
         return render_image(blob, alt)
 
     assignments: dict[int, list[ImageBlob]] = {}

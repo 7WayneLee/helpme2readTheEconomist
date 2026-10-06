@@ -74,6 +74,71 @@ def test_inline_caption_and_alt_in_report_and_site(sample_digest: Digest, illust
         assert story.index('alt="台灣晶片展望 插圖"') < story.index("閱讀摘要")
 
 
+@pytest.mark.parametrize("kind,label", [("chart", "圖表"), ("map", "地圖"),
+                                       ("photo", "配圖"), ("illustration", "配圖")])
+def test_short_alt_and_takeaway_first_captions(sample_digest, illustrated_epub, tmp_path, kind, label):
+    images = load_issue_images(illustrated_epub)
+    images.by_article["sample-1"] = images.by_article["normal"]
+    blob = images.by_article["sample-1"].inline[0].image
+    sample_digest.figure_notes[blob.name] = {
+        "kind": kind, "alt_zh": '配圖："A" <乙> & 背景',
+        "takeaway_zh": '甲地區的比率明顯高於乙地區。',
+        "description_zh": '長條圖比較兩個地區在 2025 年的比率，單位為百分比。來源：合成資料。'}
+    for html in (render_html(sample_digest, images),
+                 build_site(sample_digest, tmp_path / "site", images=images).pages["taiwan"].read_text()):
+        assert 'alt="配圖：&quot;A&quot; &lt;乙&gt; &amp; 背景" loading="lazy"' in html
+        if kind in {"chart", "map"}:
+            assert (f'<figcaption>▲ {label}｜重點：甲地區的比率明顯高於乙地區。　'
+                    '長條圖比較兩個地區在 2025 年的比率，單位為百分比。來源：合成資料。</figcaption>') in html
+        else:
+            assert '<figcaption>▲ 配圖：長條圖比較兩個地區在 2025 年的比率，單位為百分比。來源：合成資料。</figcaption>' in html
+            assert '重點：甲地區' not in html
+
+
+@pytest.mark.parametrize("kind,label", [("chart", "圖表"), ("map", "地圖")])
+@pytest.mark.parametrize("takeaway", [None, 42, "甲" * 9, "甲" * 61])
+def test_chart_without_valid_takeaway_renders_description(sample_digest, illustrated_epub, tmp_path,
+                                                        kind, label, takeaway):
+    images = load_issue_images(illustrated_epub)
+    images.by_article["sample-1"] = images.by_article["normal"]
+    blob = images.by_article["sample-1"].inline[0].image
+    note = {"kind": kind, "alt_zh": "圖表：合成地區比較", "description_zh": "甲" * 20}
+    if takeaway is not None:
+        note["takeaway_zh"] = takeaway
+    sample_digest.figure_notes[blob.name] = note
+    for html in (render_html(sample_digest, images),
+                 build_site(sample_digest, tmp_path / "site", images=images).pages["taiwan"].read_text()):
+        assert f'<figcaption>▲ {label}｜' + "甲" * 20 + '</figcaption>' in html
+        assert 'alt="圖表：合成地區比較"' in html
+        assert '重點：' not in html
+
+
+@pytest.mark.parametrize("bad_field", [
+    {"kind": "unknown"}, {"alt_zh": "短"}, {"alt_zh": 42},
+    {"description_zh": "甲" * 141}, {"description_zh": None}])
+def test_invalid_new_note_keeps_image_without_caption(sample_digest, illustrated_epub, tmp_path, bad_field):
+    images = load_issue_images(illustrated_epub)
+    images.by_article["sample-1"] = images.by_article["normal"]
+    blob = images.by_article["sample-1"].inline[0].image
+    sample_digest.figure_notes[blob.name] = {
+        "kind": "chart", "alt_zh": "圖表：合成地區比較", "description_zh": "甲" * 20, **bad_field}
+    for html in (render_html(sample_digest, images),
+                 build_site(sample_digest, tmp_path / "site", images=images).pages["taiwan"].read_text()):
+        story = html.split('<article class="story">')[1].split("</article>")[0]
+        assert story.count('<figure>') == 2 and '<figcaption>' not in story
+        assert story.count('alt="台灣晶片展望 插圖"') == 2
+
+
+def test_legacy_long_chart_description_still_renders(sample_digest, illustrated_epub):
+    images = load_issue_images(illustrated_epub)
+    images.by_article["sample-1"] = images.by_article["normal"]
+    blob = images.by_article["sample-1"].inline[0].image
+    sample_digest.figure_notes[blob.name] = {"kind": "chart", "description_zh": "甲" * 180}
+    html = render_html(sample_digest, images)
+    assert '<figcaption>▲ 圖表：' + "甲" * 180 + '</figcaption>' in html
+    assert 'alt="' + "甲" * 180 + '"' in html
+
+
 def test_no_note_preserves_inline_image_without_caption(sample_digest: Digest, illustrated_epub: Path,
                                                        tmp_path: Path) -> None:
     images = load_issue_images(illustrated_epub)

@@ -9,6 +9,7 @@ from email.message import Message
 from email.utils import formatdate
 from pathlib import Path
 from urllib.error import HTTPError
+from types import SimpleNamespace
 
 import pytest
 
@@ -47,6 +48,35 @@ def test_rdf_atom_short_excerpt_and_invalid_dates():
     assert parse_rss(atom, 'BBC', '')[0].source.date == '2026-10-01'
     assert parse_rss(feed(published='bad date'), 'BBC', '') == []
     assert parse_rss(feed(url='https://reuters.com/synthetic'), 'BBC', '') == []
+
+
+def test_rfi_uses_traditional_feed():
+    assert next(site for site in INTERNATIONAL if site.key == 'rfi').url == 'https://www.rfi.fr/tw/rss'
+
+
+def test_dw_converts_fresh_and_cached_evidence_without_changing_wording(tmp_path, monkeypatch):
+    from econ_digest.zhtw import normalize as normalizer
+    site = next(site for site in INTERNATIONAL if site.key == 'dw')
+    url = 'https://www.dw.com/zh/synthetic/a-123'
+    title = '特朗普："台湾软件与社论"'
+    body = feed(url, title).replace('Taiwan synthetic evidence.', '台湾的软件与社论。')
+    calls = []
+
+    def convert(command, **kwargs):
+        calls.append(command)
+        assert command == ['/synthetic/opencc', '-c', 's2tw']
+        return SimpleNamespace(stdout=kwargs['input'].translate(str.maketrans('湾软论与', '灣軟論與')))
+
+    monkeypatch.setattr(normalizer.shutil, 'which', lambda _: '/synthetic/opencc')
+    monkeypatch.setattr(normalizer.subprocess, 'run', convert)
+    fetcher = Fetcher(tmp_path, opener=lambda *_args, **_kwargs: io.BytesIO(body.encode()))
+    fresh = RSSAdapter(site, fetcher, DAY).retrieve({'軟件'})
+    warm = RSSAdapter(site, Fetcher(tmp_path, opener=lambda *_args, **_kwargs: pytest.fail('use cached feed')), DAY).latest()
+    for entries in (fresh, warm):
+        assert len(entries) == 1
+        assert entries[0].source == Source('DW 中文', '2026-10-02', '特朗普："台灣軟件與社論"', url)
+        assert entries[0].excerpt == '台灣的軟件與社論。'
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize('site, path', [(DOMESTIC[0], '/article/123'), (DOMESTIC[1], '/news/story/1/123'), (DOMESTIC[2], 'https://news.ltn.com.tw/news/politics/breakingnews/123')])

@@ -21,6 +21,8 @@ from conftest import article, issue, payload
 
 CHART = "長條圖比較兩個地區在 2025 年的比率，單位為百分比。甲地區約 60%，高於乙地區的約 40%。"
 PHOTO = "兩位行人走過城市街道，背景可見商店。"
+ALT = "圖表：兩個地區的比率比較"
+TAKEAWAY = "甲地區的比率明顯高於乙地區"
 
 
 def blobs(count: int = 1) -> list[ImageBlob]:
@@ -42,7 +44,8 @@ def inputs(count: int = 1):
 
 
 def figure_response(prompt: str):
-    return {"figures": [{"image": image["image"], "kind": "chart", "description_zh": CHART}
+    return {"figures": [{"image": image["image"], "kind": "chart", "alt_zh": ALT,
+                         "takeaway_zh": TAKEAWAY, "description_zh": CHART}
                         for image in payload(prompt, "圖片：")]}
 
 
@@ -163,19 +166,53 @@ def test_invalid_envelope(data):
         validate_figures(data, ["a.png"])
 
 
-@pytest.mark.parametrize("kind,min_length,max_length", [("chart", 20, 180), ("map", 20, 180),
+@pytest.mark.parametrize("kind,min_length,max_length", [("chart", 20, 140), ("map", 20, 140),
                                                         ("photo", 8, 60), ("illustration", 8, 60)])
 def test_caption_length_boundaries(kind, min_length, max_length):
     for length in (min_length, max_length):
-        assert len(figure_note({"kind": kind, "description_zh": "甲" * length})["description_zh"]) == length
+        assert len(figure_note({"kind": kind, "alt_zh": ALT, "description_zh": "甲" * length})["description_zh"]) == length
     for length in (min_length - 1, max_length + 1):
         with pytest.raises(ValueError, match="characters"):
-            figure_note({"kind": kind, "description_zh": "甲" * length})
+            figure_note({"kind": kind, "alt_zh": ALT, "description_zh": "甲" * length})
 
 
 @pytest.mark.parametrize("kind", ["chart", "map"])
-def test_chart_and_map_accept_descriptions_over_old_limit(kind):
-    assert len(figure_note({"kind": kind, "description_zh": "甲" * 161})["description_zh"]) == 161
+def test_chart_and_map_reject_descriptions_over_new_limit(kind):
+    with pytest.raises(ValueError, match="20–140"):
+        figure_note({"kind": kind, "alt_zh": ALT, "description_zh": "甲" * 161})
+
+
+@pytest.mark.parametrize("length", [6, 40])
+def test_short_alt_boundaries(length):
+    assert figure_note({"kind": "chart", "alt_zh": "甲" * length,
+                        "description_zh": CHART})["alt_zh"] == "甲" * length
+
+
+@pytest.mark.parametrize("alt", [None, 42, "甲" * 5, "甲" * 41, "社論的配圖說明"])
+def test_invalid_short_alt(alt):
+    with pytest.raises(ValueError, match="alt_zh"):
+        figure_note({"kind": "chart", "alt_zh": alt, "description_zh": CHART})
+
+
+@pytest.mark.parametrize("kind", ["chart", "map"])
+@pytest.mark.parametrize("length", [10, 60])
+def test_takeaway_boundaries(kind, length):
+    assert figure_note({"kind": kind, "alt_zh": ALT, "takeaway_zh": "甲" * length,
+                        "description_zh": CHART})["takeaway_zh"] == "甲" * length
+
+
+@pytest.mark.parametrize("kind", ["chart", "map"])
+@pytest.mark.parametrize("takeaway", [None, 42, "", "甲" * 9, "甲" * 61, "社論的圖表呈現明顯上升"])
+def test_invalid_takeaway_preserves_description(kind, takeaway):
+    assert figure_note({"kind": kind, "alt_zh": ALT, "takeaway_zh": takeaway,
+                        "description_zh": CHART}) == {"kind": kind, "alt_zh": ALT, "description_zh": CHART}
+
+
+@pytest.mark.parametrize("kind", ["photo", "illustration"])
+def test_photos_and_illustrations_have_no_takeaway(kind):
+    assert figure_note({"kind": kind, "alt_zh": "配圖：城市中的行人", "takeaway_zh": TAKEAWAY,
+                        "description_zh": PHOTO}) == {
+                            "kind": kind, "alt_zh": "配圖：城市中的行人", "description_zh": PHOTO}
 
 
 def test_prompt_restricts_ambiguous_marks_and_exception_claims(analysis_config):
@@ -200,12 +237,19 @@ def test_invalid_kind(kind):
 @pytest.mark.parametrize("description", [None, 42, "社論" + PHOTO])
 def test_invalid_description(description):
     with pytest.raises(ValueError, match="description_zh"):
-        figure_note({"kind": "photo", "description_zh": description})
+        figure_note({"kind": "photo", "alt_zh": ALT, "description_zh": description})
 
 
 def test_caption_normalisation():
-    result = figure_note({"kind": "illustration", "description_zh": "  晶片上的軟件顯示人工智能運算。  "})
-    assert result == {"kind": "illustration", "description_zh": "晶片上的軟體顯示人工智慧運算。"}
+    result = figure_note({"kind": "illustration", "alt_zh": "  配圖：晶片上的軟件  ",
+                          "description_zh": "  晶片上的軟件顯示人工智能運算。  "})
+    assert result == {"kind": "illustration", "alt_zh": "配圖：晶片上的軟體",
+                      "description_zh": "晶片上的軟體顯示人工智慧運算。"}
+
+
+def test_takeaway_normalisation():
+    assert figure_note({"kind": "chart", "alt_zh": ALT, "takeaway_zh": "  軟件與人工智能的使用明顯增加。  ",
+                        "description_zh": CHART})["takeaway_zh"] == "軟體與人工智慧的使用明顯增加。"
 
 
 @pytest.mark.parametrize("name", ["../escape.png", "/absolute.png", "EPUB/../../escape.png"])
@@ -234,7 +278,8 @@ def test_invalid_item_keeps_other_caption_and_warns(analysis_config, tmp_path, m
     warnings = []
     notes = describe_figures(source, classes, summaries, ["a1"], analysis_config,
                              UnitRunner(fake, tmp_path / "cache"), warnings)
-    assert notes == {blobs(2)[1].name: {"kind": "chart", "description_zh": CHART}}
+    assert notes == {blobs(2)[1].name: {"kind": "chart", "alt_zh": ALT,
+                                      "takeaway_zh": TAKEAWAY, "description_zh": CHART}}
     assert warnings == [FIGURE_WARNING] and len(fake.calls) == 1
     warm = FakeLLMClient(lambda *_: pytest.fail("warm cache must avoid calls"))
     repeated_warnings = []

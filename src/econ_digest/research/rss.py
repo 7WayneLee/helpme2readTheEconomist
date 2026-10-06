@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from datetime import date
 
 from ..models import Source
+from ..zhtw.normalize import _convert_batch
 from .cna import Evidence
 from .http import Fetcher
 from .parsers import parse_rss, recent
@@ -56,7 +58,16 @@ class RSSAdapter:
     def latest(self) -> list[Evidence]:
         data = self.fetcher.cached(self.site.url, 'rss',
                                    lambda body: [e.to_dict() for e in parse_rss(body, self.site.outlet, self.site.url)], once=True)
-        return recent(restore(data), self.issue_date, 14)
+        entries = recent(restore(data), self.issue_date, 14)
+        if self.site.key == 'dw':
+            # Convert fresh and already cached feeds before matching/evidence.
+            # Reuse script conversion only: quoted titles retain their wording,
+            # punctuation and links, without the model-text glossary rewrites.
+            converted = iter(_convert_batch([text for entry in entries
+                                            for text in (entry.source.title, entry.excerpt)]))
+            entries = [replace(entry, source=replace(entry.source, title=next(converted)),
+                               excerpt=next(converted)[:200]) for entry in entries]
+        return entries
 
     def retrieve(self, terms: set[str]) -> list[Evidence]:
         return match(self.latest(), terms)
