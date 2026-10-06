@@ -21,6 +21,21 @@ from econ_digest.models import Article, Issue
 def offline_analysis_research(monkeypatch: pytest.MonkeyPatch) -> None:
     from econ_digest.analysis import pipeline
     from econ_digest.research.cna import CNAClient
+    from econ_digest.research import http
+    from types import SimpleNamespace
+
+    def offline_open(*args, **kwargs):
+        raise OSError("synthetic offline evidence")
+
+    monkeypatch.setattr(http, "build_opener", lambda *args: SimpleNamespace(open=offline_open))
+
+    original_init = CNAClient.__init__
+
+    def offline_init(self, *args, **kwargs):
+        kwargs.setdefault("sleep", lambda _: None)
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(CNAClient, "__init__", offline_init)
 
     class OfflineCNA(CNAClient):
         def search(self, query: str):

@@ -11,7 +11,9 @@ from typing import Any
 from ..config import Config
 from ..facts import load_taiwan_facts
 from ..models import ArticleSummary, Classification, Issue, Source, save_json
-from ..research.cna import CNAClient, Evidence, cna_url
+from ..research.cna import CNAClient, Evidence
+from ..research.client import for_analysis
+from ..research.parsers import source_url
 from ..signals import find_taiwan_signals
 from ..taxonomy import assign_tier
 from .cache import UnitRunner
@@ -170,10 +172,11 @@ def ground_digest(issue: Issue, classifications: dict[str, Classification], summ
             queries.update({item["article_id"]: item["queries"] for item in result.data["articles"]})
         else:
             warnings.append("台灣關聯搜尋詞產生失敗，改用原文與事實檔查證。")
-    previous_errors = len(cna.errors)
-    evidence = {identifier: cna.retrieve(queries[identifier]) if identifier in queries else [] for identifier in ids}
-    if len(cna.errors) > previous_errors:
-        warnings.append("中央社暫時無法連線；台灣關聯改以原文、事實檔與已取得的證據查證。")
+    research = for_analysis(cna, config.research, issue.issue_date)
+    articles = {article.id: article for article in issue.articles}
+    evidence = {identifier: research.retrieve(queries[identifier], articles[identifier])
+                if identifier in queries else [] for identifier in ids}
+    warnings.extend(research.notices(available=any(evidence.values())))
     for unit in grounding_units(issue, ids, classifications, summaries, evidence, config):
         result = runner.run(unit)
         selected = {identifier: evidence[identifier] for identifier in unit.article_ids}
@@ -195,7 +198,7 @@ def validate_fact_alerts(data: dict[str, Any], headlines: dict[str, str]) -> Non
                       and all(isinstance(item.get(key), str) and item[key].strip()
                               for key in ("fact", "suspected_new_value", "evidence_url", "evidence_title"))
                       and headlines.get(item["evidence_url"]) == item["evidence_title"]
-                      and cna_url(item["evidence_url"])]
+                      and source_url(item["evidence_url"])]
 
 
 def facts_unit(issue_date: str, evidence: list[Evidence], config: Config) -> Unit:
@@ -211,7 +214,7 @@ def facts_unit(issue_date: str, evidence: list[Evidence], config: Config) -> Uni
 def check_facts(issue_date: str, config: Config, runner: UnitRunner, cna: CNAClient,
                 warnings: list[str]) -> list[dict]:
     # A successful check is fixed for this issue, even when the search cache ages.
-    identity = hashlib.sha256((load_taiwan_facts() + prompt_json(config.llm.models.facts)
+    identity = hashlib.sha256((load_taiwan_facts() + prompt_json(asdict(config.research)) + prompt_json(config.llm.models.facts)
                                + facts_unit(issue_date, [], config).prompt_hash).encode()).hexdigest()
     path = runner.workdir / f"facts-check-{issue_date}.json"
     try:
@@ -225,10 +228,9 @@ def check_facts(issue_date: str, config: Config, runner: UnitRunner, cna: CNACli
             return saved["alerts"]
     except (OSError, ValueError, TypeError):
         pass
-    before = len(cna.errors)
-    evidence = cna.retrieve_search(list(FACT_QUERIES))
-    notices = (["中央社暫時無法連線；台灣事實檔更新檢查僅能使用已取得的證據。"]
-               if len(cna.errors) > before else [])
+    research = for_analysis(cna, config.research, issue_date)
+    evidence = research.facts(list(FACT_QUERIES))
+    notices = research.notices(available=bool(evidence), facts=True)
     warnings.extend(notices)
     result = runner.run(facts_unit(issue_date, evidence, config))
     if not result.data:

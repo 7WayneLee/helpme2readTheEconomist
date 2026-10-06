@@ -180,6 +180,8 @@ class CNAClient:
         self._last_request: float | None = None
         self.request_budget, self.max_retries = request_budget, max_retries
         self.request_count = 0
+        self.fetcher = None  # Attached only by the multi-source analysis client.
+        self.robots_blocked = False
         self.errors: list[str] = []
         self.warnings: list[str] = []
 
@@ -195,6 +197,12 @@ class CNAClient:
         return max(0.0, seconds) if math.isfinite(seconds) else 0.0
 
     def _fetch(self, url: str) -> str | None:
+        if self.fetcher is not None:
+            before = len(self.fetcher.errors)
+            result = self.fetcher.fetch(url)
+            self.request_count = self.fetcher.request_count
+            self.errors.extend(error for _, error in self.fetcher.errors[before:])
+            return result
         retry_delay = 0.0
         for attempt in range(self.max_retries + 1):
             if self.request_count >= self.request_budget:
@@ -259,6 +267,9 @@ class CNAClient:
 
     def search(self, query: str) -> list[Source]:
         url = BASE_URL + "/search/hysearchws.aspx?" + urlencode({"q": query})
+        if self.fetcher is not None and not self.fetcher.search_allowed(url):
+            self.robots_blocked = True
+            return []
         data = self._cached(url, SEARCH_TTL, lambda html: [source.to_dict() for source in parse_search(html, today=self.today)])
         # Recency is rechecked on cache reads, with dates derived from URLs again.
         sources = []
