@@ -46,7 +46,7 @@ def figure_note(item: dict[str, Any]) -> dict[str, str]:
     if not isinstance(description, str) or "社論" in description:
         raise ValueError("description_zh must be text without the prohibited term")
     description = normalize_zh_tw(description.strip())
-    minimum, maximum = (20, 160) if kind in {"chart", "map"} else (8, 60)
+    minimum, maximum = (20, 180) if kind in {"chart", "map"} else (8, 60)
     if not minimum <= len(description) <= maximum:
         raise ValueError(f"{kind} description_zh requires {minimum}–{maximum} characters")
     return {"kind": kind, "description_zh": description}

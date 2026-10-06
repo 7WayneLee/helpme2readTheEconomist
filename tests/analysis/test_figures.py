@@ -114,7 +114,7 @@ def test_invalid_envelope(data):
         validate_figures(data, ["a.png"])
 
 
-@pytest.mark.parametrize("kind,min_length,max_length", [("chart", 20, 160), ("map", 20, 160),
+@pytest.mark.parametrize("kind,min_length,max_length", [("chart", 20, 180), ("map", 20, 180),
                                                         ("photo", 8, 60), ("illustration", 8, 60)])
 def test_caption_length_boundaries(kind, min_length, max_length):
     for length in (min_length, max_length):
@@ -122,6 +122,22 @@ def test_caption_length_boundaries(kind, min_length, max_length):
     for length in (min_length - 1, max_length + 1):
         with pytest.raises(ValueError, match="characters"):
             figure_note({"kind": kind, "description_zh": "甲" * length})
+
+
+@pytest.mark.parametrize("kind", ["chart", "map"])
+def test_chart_and_map_accept_descriptions_over_old_limit(kind):
+    assert len(figure_note({"kind": kind, "description_zh": "甲" * 161})["description_zh"]) == 161
+
+
+def test_prompt_restricts_ambiguous_marks_and_exception_claims(analysis_config):
+    source, classes, summaries, images = inputs()
+    unit = figure_units(source, classes, summaries, ["a1"], analysis_config, images=images, extract=False)[0]
+    assert "不得使用「僅」「只有」宣稱例外，除非圖中本身以文字明確標示該例外" in unit.prompt
+    assert "不要逐一列舉例外，也不要描述細微差異" in unit.prompt
+    assert "短箭頭" in unit.prompt and "一個網格刻度以內" in unit.prompt and "折線互相重疊" in unit.prompt
+    assert "直接印出，或位置清楚落在網格刻度上" in unit.prompt
+    assert "至多補充一兩項" in unit.prompt and "不確定的主張直接省略" in unit.prompt
+    assert "以 140 字內為目標" in unit.prompt
 
 
 @pytest.mark.parametrize("kind", [None, [], "diagram", "CHART", 1])

@@ -48,7 +48,7 @@ def structure_html(values: list[str], inline: list[PositionedImage], render_imag
     def illustrated(blob: ImageBlob) -> str:
         note = (figure_notes or {}).get(blob.name)
         if note:
-            label = "圖表" if note["kind"] in {"chart", "map"} else "配圖"
+            label = {"chart": "圖表", "map": "地圖"}.get(note["kind"], "配圖")
             description = note["description_zh"]
             return render_image(blob, description, caption=f"▲ {label}：{description}")
         return render_image(blob, alt)

@@ -54,7 +54,7 @@ def test_illustration_alt_text_escaped(sample_digest: Digest, illustrated_epub: 
     assert 'alt="測試 &quot; &lt; &amp; 插圖"' in render_html(sample_digest, images)
 
 
-@pytest.mark.parametrize("kind,label", [("chart", "圖表"), ("map", "圖表"),
+@pytest.mark.parametrize("kind,label", [("chart", "圖表"), ("map", "地圖"),
                                        ("photo", "配圖"), ("illustration", "配圖")])
 def test_inline_caption_and_alt_in_report_and_site(sample_digest: Digest, illustrated_epub: Path,
                                                  tmp_path: Path, kind: str, label: str) -> None:

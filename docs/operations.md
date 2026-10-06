@@ -433,7 +433,7 @@ author_email = "you@example.com"
 | **Telegram 內建瀏覽器無法登入網站** | Telegram 內建瀏覽器不支援 HTTP Basic Auth 彈窗。 | 屬於 Telegram 應用程式限制。 | 點擊瀏覽器選單選擇「在預設瀏覽器中開啟」（Safari / Chrome）即可正常輸入帳密。 |
 | **GitHub 備份 push 失敗** | Git 權限不符、儲存庫未建立或網路問題。 | 記錄警告（`網站備份失敗`），導讀主流程持續完成。 | 檢查 GitHub SSH 金鑰與儲存庫權限；確保備份儲存庫設定為 Private。 |
 | **英文選文或學習指南失敗** | 選文或指南模型呼叫逾時或格式錯誤。 | 記錄警告（`英文選文失敗`），導讀主流程持續完成。 | 檢查模型配額與網路；必要時加上 `--reanalyze` 重新執行。 |
-| **插圖說明產生失敗，圖片保留但無說明。** | 圖片讀取或模型呼叫失敗，或圖說種類、字數、圖片名稱驗證未通過。 | 私人網站與單檔 HTML 保留圖片，省略失敗的圖說；其餘導讀仍可產出。 | 檢查 `data/issues/te_YYYY.MM.DD/figures/` 圖片與 gwg 配額，確認 `[llm.models] figures` 支援看圖後重新執行 `analyze`；成功的單元沿用快取。若需重試已快取的不合規個別圖說，僅刪除對應的 `analysis/figures-*.json`。 |
+| **插圖說明產生失敗，圖片保留但無說明。** | 圖片讀取或模型呼叫失敗，或圖說種類、字數、圖片名稱驗證未通過（圖表、地圖 20–180 字；照片、插畫 8–60 字）。 | 私人網站與單檔 HTML 保留圖片，省略失敗的圖說；其餘導讀仍可產出。地圖圖說使用「▲ 地圖：」，圖表使用「▲ 圖表：」，照片與插畫使用「▲ 配圖：」。 | 檢查 `data/issues/te_YYYY.MM.DD/figures/` 圖片與 gwg 配額，確認 `[llm.models] figures` 支援看圖後重新執行 `analyze`；成功的單元沿用快取。提示詞以 140 字內及清楚可辨識的主張為目標，省略細微差異與未標示的例外。若需重試已快取的不合規個別圖說，僅刪除對應的 `analysis/figures-*.json`。 |
 | **`--pages-only` 於 messages 模式失敗** | 設定檔為 `delivery = "messages"` 時執行了 `--pages-only`。 | 輸出提示並以 exit code 2 退出。 | 確認 `delivery = "telegraph"`；若在 messages 模式下需重送請用 `--force`。 |
 | **執行鎖已被占用 (`AlreadyRunning`)** | 同一時間已有另一個實例正在運行。 | 捕捉非阻塞檔案鎖失敗並安全退出（exit code 0）。 | 正常保護機制；若程序卡死，使用 `ps aux \| grep econ-digest` 確認。 |
 | **`edit` 或 `ground` 階段逾時** | `edit`（預設 900 秒）批次編修或 `ground`（預設 600 秒，`ground_queries` 亦同）取證比對耗時超出門檻。 | 達逾時門檻後，`edit` 自動切換至 Claude Sonnet 4.6 備援，`ground` 自動切換至 Gemini 3.8 Flash 備援。 | 確認 `stage_timeout_seconds` 未被誤設過低；檢查網路連線。 |
