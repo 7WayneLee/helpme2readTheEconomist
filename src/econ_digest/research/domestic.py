@@ -45,7 +45,12 @@ class DomesticAdapter:
             def parse(body):
                 return {'dated': [e.to_dict() for e in parse_html_list(body, self.site.outlet, url)],
                         'candidates': parse_candidates(body, self.site, url)}
+            before = len(self.fetcher.errors)
             data = self.fetcher.cached(url, 'search', parse)
+            if self.site.key == 'ltn' and self.fetcher.errors[before:] == [(url, 'HTTPError:404')]:
+                # LTN search uses 404 for a normal page with no matches.
+                del self.fetcher.errors[before:]
+                continue
             dated = restore(data.get('dated', [])) if isinstance(data, dict) else []
             hits = recent(dated, self.issue_date, 365)
             known = {e.source.url for e in dated}
