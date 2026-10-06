@@ -81,7 +81,8 @@ def test_house_style_prefix_on_all_generated_units(analysis_config: Config) -> N
     units += query_units(source, ['a1'], classes, summaries, analysis_config)
     units += grounding_units(source, ['a1'], classes, summaries, {'a1': []}, analysis_config)
     style = (PROMPT_DIR / '_style.md').read_text()
-    assert all(unit.prompt.startswith((style.split('\n## 三、', 1)[0] if unit.stage == 'edit' else style) + '\n')
+    from econ_digest.analysis.prompts import editor_style
+    assert all(unit.prompt.startswith((editor_style(style) if unit.stage == 'edit' else style) + '\n')
                for unit in units)
     assert '泛論「中國影響力擴大，所以台灣受影響」為 0' in units[0].prompt
     assert '待查證的暫定判斷' in units[0].prompt
