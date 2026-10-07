@@ -96,6 +96,8 @@ class ThreadsClient:
         if character_count(post.text) > 500:
             raise ValueError("Threads 貼文超過 500 字元。")
         params = {"media_type": "IMAGE" if post.image_url else "TEXT", "text": post.text}
+        if post.topic_tag:
+            params["topic_tag"] = post.topic_tag
         if post.image_url:
             params["image_url"] = post.image_url
         else:

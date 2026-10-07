@@ -102,7 +102,7 @@ timezone = "Asia/Taipei"
 interval_minutes = 60 # 修改後重新安裝 Threads 定時器
 max_per_day = 15 # 依上述時區的日曆日計算，含本期介紹
 link_target = "section" # section：文章專區的 Telegraph 頁面；weekly：本週導讀
-hashtags = ["#經濟學人導讀"] # 1 至 2 個標籤
+topic_tag = "經濟學人導讀" # 每則一個主題，以 API 參數設定；1–50 字元，不含 . 或 &；空字串不送主題
 
 [site]
 enabled = false

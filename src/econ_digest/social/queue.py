@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 from pathlib import Path
+import re
 from urllib.parse import urlsplit
 
 from ..config import ThreadsConfig
@@ -17,6 +18,20 @@ from .formatting import Post, article_post, character_count, intro_post
 from .tokens import timestamp
 
 GROUPS = {"taiwan": "台灣", "focus": "本週焦點", "international": "國際", "topics": "財經・科技・文化"}
+
+
+class RequeueError(ValueError):
+    """A local, safe-to-display requeue selection or state error."""
+
+
+def _migrate_post(record: dict) -> Post:
+    post = Post(**record)
+    if "topic_tag" not in record:
+        # Remove only the legacy formatter's final hashtag paragraph.
+        body, separator, tags = post.text.rpartition("\n\n")
+        if separator and re.fullmatch(r"#[\w]+(?: #[\w]+)*", tags):
+            post = replace(post, text=body, topic_tag=tags.split()[0][1:])
+    return post
 
 
 def _group(anchor: str) -> str:
@@ -128,6 +143,9 @@ class Queue:
                     timestamp(state[name])
             keys = set()
             for record in state["posts"]:
+                # Legacy pending text has not been sent to a container yet.
+                if "topic_tag" not in record["post"] and record["status"] == "pending":
+                    record["post"] = asdict(_migrate_post(record["post"]))
                 post = Post(**record["post"])
                 if (any(not isinstance(value, str) or not value for value in (
                     post.key, post.issue_date, post.article_id, post.section, post.text, post.link_url))
@@ -148,6 +166,12 @@ class Queue:
                     raise ValueError
                 if record["status"] == "publishing" and not record.get("publish_started_at"):
                     raise ValueError
+                if not isinstance(record.get("history", []), list):
+                    raise ValueError
+                for previous in record.get("history", []):
+                    if not isinstance(previous["post_id"], str) or not previous["post_id"]:
+                        raise ValueError
+                    timestamp(previous["published_at"])
                 keys.add(post.key)
         except (KeyError, TypeError, ValueError, AttributeError) as exc:
             raise StateError("Threads 佇列格式錯誤；請保留原檔並檢查發布紀錄。") from exc
@@ -170,6 +194,32 @@ class Queue:
                 added += 1
             self.save(state)
             return added
+
+    def requeue(self, key: str, *, topic_tag: str | None = None) -> bool:
+        """Reset a published record in place, keeping its previous publication."""
+        with self.lock():
+            state = self.load()
+            record = next((item for item in state["posts"] if item["post"]["key"] == key), None)
+            if record is None:
+                raise RequeueError("找不到指定的佇列貼文；請先查看 social threads status。")
+            if record["status"] == "pending":
+                return False
+            if record["status"] != "posted":
+                raise RequeueError("貼文仍在處理中或發布結果待確認；請先核對發布紀錄。")
+            post = _migrate_post(record["post"])
+            if topic_tag is not None:
+                post = replace(post, topic_tag=topic_tag)
+            record.setdefault("history", []).append({
+                "post_id": record["post_id"], "published_at": record["published_at"],
+                "post": record["post"], "container_id": record["container_id"],
+            })
+            record["post"] = asdict(post)
+            record.update(status="pending", container_id=None, post_id=None,
+                          created_at=None, published_at=None)
+            record.pop("publish_started_at", None)
+            # Keep last_posted_at, backoff, pause state and list position.
+            self.save(state)
+            return True
 
     @staticmethod
     def next(state: dict) -> dict | None:

@@ -768,7 +768,9 @@ Threads 功能預設停用。啟用後，完成 Telegram 傳送的期號會自�
 | `interval_minutes` | `60` | 成功貼文間的最短間隔；修改後重新安裝定時器 |
 | `max_per_day` | `15` | 該時區的日曆日上限，含本期介紹；API 另有滾動 24 小時額度 |
 | `link_target` | `section` | 文章所屬 Telegraph 分頁（含續頁）；`weekly` 改連本週導讀 |
-| `hashtags` | `["#經濟學人導讀"]` | 1 至 2 個 # 標籤 |
+| `topic_tag` | `"經濟學人導讀"` | 每則一個主題，1–50 字元且不含 `.` 或 `&`；設為 `""` 不送主題 |
+
+主題使用建立 TEXT／IMAGE 容器的 `topic_tag` API 參數，內文不附加 # 標籤，也不把主題算入內文 500 字元預算。每則只能設定一個主題；把 # 標籤放在文字內，Threads 會轉成主題卻留下去除 # 的文字，造成重複。省略 `topic_tag` 時使用預設「經濟學人導讀」；若只有舊的 `hashtags` 陣列，取第一個並移除開頭的 `#`；明確設定 `topic_tag` 時優先使用新鍵，包括空字串。規則見 [Threads 官方發布文件](https://developers.facebook.com/documentation/threads/posts/)。
 
 ```sh
 .venv/bin/econ-digest social threads preview --issue 2026.10.03
@@ -794,6 +796,14 @@ deploy/install-threads-timer.sh --uninstall
 
 也可將 `enabled` 改回 `false`；恢復時要重新設為 `true`。`resume` 解除人工或授權暫停，重設退避與警示記號，保留所有貼文、容器與發布紀錄；它不能自行解決 `uncertain` 的發布結果。
 
+### 修正已發布貼文
+
+1. 在 Threads App 刪除要修正的舊貼文。
+2. 以 `social threads status` 或 `preview --issue 2026.10.03` 確認本期序號，執行 `.venv/bin/econ-digest social threads requeue --issue 2026.10.03 --index 1`；序號從 1 開始，本期介紹固定為第 1 則。也可執行 `.venv/bin/econ-digest social threads requeue --key 2026.10.03:intro`，其他文章使用 `status` 顯示的完整佇列鍵。
+3. 等待定時器依發文時段、間隔與每日上限重新發布；若佇列已暫停，處理原因後再 `resume`。
+
+`requeue` 只操作本機佇列，不呼叫 Threads，也不刪除遠端貼文，不需要重新讀取期號資料。它保留佇列原文字、移除舊版 # 標籤尾行，並套用目前的主題設定；舊貼文 ID、發布時間及原文字留在該項目的 `history`，重設容器並改為待發布。仍待發布的項目是無變更操作。原佇列位置保留，較前的項目會先於後面的待發布項目發布；歷史仍計入當日已發布次數。正在建立容器、發布中或結果待確認的項目不能重新排入。
+
 ### 內容、長度與版權
 
 **文章貼文只使用我們自己的中文標題與摘要，不公開期刊原文或內文圖片；封面只附在本期介紹貼文。** 介紹使用已公開的 `site_publish.json` 封面網址，備援讀取 `telegram_progress.json` 或本機 `telegraph_cover.json` 的 `cover_url`。它包含刊期標題、封面故事標題、原期刊文章總數與本週導讀連結；文章總數包含未單獨發文的合併項目。正式加入佇列需要公開封面與已發布的 Telegraph 分頁；預覽缺資料時使用明確的本機預覽網址，不連網補資料。
@@ -805,6 +815,8 @@ deploy/install-threads-timer.sh --uninstall
 ### 狀態、故障與復原
 
 佇列、跨期已發布紀錄、容器 ID、貼文 ID、時間戳記、退避與警示都放在忽略的 `data/social/threads_queue.json`。鍵固定為「期號＋文章 ID」，介紹使用 `intro`；重複 `enqueue` 或 `send --force` 不重置既有貼文。排程持有獨立檔案鎖，與加入佇列互斥；不要刪除狀態檔重新發文。
+
+舊版佇列中尚未建立容器的待發布項目，會將末尾的 # 標籤段落移至主題參數；已建立容器的原文字保留，供發布結果復原核對。已發布貼文使用上述 `requeue` 程序更新內文與主題。
 
 | 情況 | 行為與處理 |
 | --- | --- |

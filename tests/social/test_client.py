@@ -21,6 +21,8 @@ def test_two_step_text_publication(post, now):
     params = parse_qs(create.data.decode())
     assert params['media_type'] == ['TEXT']
     assert params['text'] == [post.text]
+    assert params['topic_tag'] == ['經濟學人導讀']
+    assert '#' not in params['text'][0]
     assert params['link_attachment'] == [post.link_url]
     assert parse_qs(publish.data.decode())['creation_id'] == ['container']
     assert 'synthetic-token' not in repr(client)
@@ -33,8 +35,18 @@ def test_intro_image_does_not_send_unsupported_link_attachment(post):
     params = parse_qs(opener.requests[0].data.decode())
     assert params['media_type'] == ['IMAGE']
     assert params['image_url'] == ['https://example.invalid/cover.jpg']
+    assert params['topic_tag'] == ['經濟學人導讀']
+    assert '#' not in params['text'][0]
     assert 'link_attachment' not in params
     assert post.link_url in params['text'][0]
+
+
+@pytest.mark.parametrize('image_url', [None, 'https://example.invalid/cover.jpg'])
+def test_empty_topic_is_omitted_for_text_and_image(post, image_url):
+    opener = FakeOpener([Response({'id': 'container'})])
+    client = ThreadsClient('synthetic-token', 'synthetic-user', opener=opener)
+    client.create_container(replace(post, image_url=image_url, topic_tag=''))
+    assert 'topic_tag' not in parse_qs(opener.requests[0].data.decode(), keep_blank_values=True)
 
 
 def test_quota_uses_endpoint_config_not_assumed_ceiling(now):

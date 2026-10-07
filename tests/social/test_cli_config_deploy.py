@@ -21,6 +21,7 @@ def test_preview_cli_is_offline_and_does_not_enqueue(issue_directory, social_con
     assert '[1/5] 本週導讀' in output and '/500 字元' in output
     assert '共 5 則貼文' in output and '【台灣】' in output
     assert 'synthetic-private-token' not in output and 'synthetic-user' not in output
+    assert '#' not in output
     assert not Queue(social_config.paths.data_dir).path.exists()
 
 
@@ -54,6 +55,7 @@ def test_defaults_and_secret_loading(tmp_path, monkeypatch):
     assert not config.social.threads.enabled
     assert config.social.threads.sections == ('台灣', '本週焦點', '國際', '財經・科技・文化')
     assert config.social.threads.interval_minutes == 60 and config.social.threads.max_per_day == 15
+    assert config.social.threads.topic_tag == '經濟學人導讀'
     assert config.secrets.threads_access_token == 'synthetic-private'
     assert config.secrets.threads_user_id == 'synthetic-profile'
     assert 'synthetic-private' not in repr(config) + repr(config.secrets)
@@ -62,13 +64,102 @@ def test_defaults_and_secret_loading(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize('setting', ['interval_minutes = 0', 'max_per_day = -1', 'window_start = "25:00"',
                                      'window_end = "08:00"', 'timezone = "nowhere"', 'link_target = "private"',
-                                     'sections = ["英文學習"]', 'hashtags = ["bad"]',
-                                     'hashtags = ["#一", "#二", "#三"]', 'enabled = "true"'])
+                                     'sections = ["英文學習"]', 'topic_tag = "bad.tag"',
+                                     'topic_tag = "bad&tag"', 'topic_tag = 3', 'topic_tag = []',
+                                     'topic_tag = "   "', 'topic_tag = "' + '字' * 51 + '"',
+                                     'hashtags = []', 'hashtags = "#主題"', 'hashtags = ["#"]',
+                                     'hashtags = ["#bad.tag"]', 'hashtags = [3]', 'enabled = "true"'])
 def test_config_rejects_invalid_social_values(tmp_path, setting):
     path = tmp_path / 'config.toml'
     path.write_text('[social.threads]\n' + setting + '\n')
     with pytest.raises(ConfigError):
         load_config(path)
+
+
+@pytest.mark.parametrize(('setting', 'expected'), [
+    ('', '經濟學人導讀'), ('topic_tag = ""', ''), ('topic_tag = "題"', '題'),
+    ('topic_tag = "' + '字' * 50 + '"', '字' * 50),
+    ('topic_tag = "台灣 經濟"', '台灣 經濟'),
+    ('hashtags = ["#導讀", "#台灣"]', '導讀'), ('hashtags = ["導讀"]', '導讀'),
+    ('hashtags = ["#一", "#二", "#三"]', '一'),
+    ('hashtags = ["#舊"]\ntopic_tag = "新"', '新'),
+    ('hashtags = ["#舊"]\ntopic_tag = ""', ''),
+])
+def test_topic_config_defaults_compatibility_and_explicit_override(tmp_path, setting, expected):
+    path = tmp_path / 'config.toml'
+    path.write_text('[social.threads]\n' + setting + '\n')
+    assert load_config(path).social.threads.topic_tag == expected
+
+
+@pytest.mark.parametrize('selection', [('--issue', '2026.10.03', '--index', '1'),
+                                       ('--key', '2026.10.03:intro')])
+def test_requeue_cli_refreshes_published_text_and_preserves_history(
+        issue_directory, social_config, monkeypatch, capsys, now, selection):
+    monkeypatch.setattr('econ_digest.cli.load_config', lambda _: social_config)
+    def forbidden(*args, **kwargs):
+        pytest.fail('requeue must remain offline')
+    monkeypatch.setattr('econ_digest.commands.social.Scheduler', forbidden)
+    monkeypatch.setattr('econ_digest.social.client.build_opener', forbidden)
+    assert main(['social', 'threads', 'enqueue', '--issue', '2026.10.03']) == 0
+    queue = Queue(social_config.paths.data_dir)
+    state = queue.load()
+    state['posts'][0]['post']['text'] += '\n\n#經濟學人導讀'
+    state['posts'][0]['post'].pop('topic_tag')
+    state['posts'][0].update(status='posted', post_id='old-post', container_id='old-container',
+                              published_at=now.isoformat())
+    queue.save(state)
+    # Requeue needs only the queue, even if the original issue was archived.
+    shutil.rmtree(issue_directory)
+    assert main(['social', 'threads', 'requeue', *selection]) == 0
+    assert '已重新排入佇列' in capsys.readouterr().out
+    current = queue.load()['posts'][0]
+    assert current['status'] == 'pending'
+    assert '#' not in current['post']['text']
+    assert current['post']['topic_tag'] == '經濟學人導讀'
+    assert current['history'][0]['post_id'] == 'old-post'
+    assert current['history'][0]['published_at'] == now.isoformat()
+    assert current['history'][0]['post']['text'].endswith('#經濟學人導讀')
+    before = queue.path.read_bytes()
+    assert main(['social', 'threads', 'requeue', *selection]) == 0
+    assert '仍待發布' in capsys.readouterr().out
+    assert queue.path.read_bytes() == before
+
+
+@pytest.mark.parametrize('selection', [('--issue', '2026.10.03', '--index', '0'),
+                                       ('--issue', '2026.10.03', '--index', '6'),
+                                       ('--index', '1'), ('--key', '2026.10.03:missing')])
+def test_requeue_cli_rejects_unknown_selection(issue_directory, social_config, monkeypatch, selection):
+    monkeypatch.setattr('econ_digest.cli.load_config', lambda _: social_config)
+    assert main(['social', 'threads', 'enqueue', '--issue', '2026.10.03']) == 0
+    queue = Queue(social_config.paths.data_dir)
+    before = queue.path.read_bytes()
+    assert main(['social', 'threads', 'requeue', *selection]) == 1
+    assert queue.path.read_bytes() == before
+
+
+def test_status_indices_and_requeue_are_scoped_to_each_issue(
+        issue_directory, social_config, monkeypatch, capsys, now):
+    from econ_digest.social.formatting import Post
+    monkeypatch.setattr('econ_digest.cli.load_config', lambda _: social_config)
+    assert main(['social', 'threads', 'enqueue', '--issue', '2026.10.03']) == 0
+    queue = Queue(social_config.paths.data_dir)
+    older = replace(Post(**queue.load()['posts'][0]['post']), key='2026.09.26:intro',
+                    issue_date='2026.09.26')
+    queue.enqueue([older])
+    state = queue.load()
+    state['posts'][1].update(status='posted', post_id='taiwan-post', published_at=now.isoformat())
+    queue.save(state)
+    assert main(['social', 'threads', 'status']) == 0
+    output = capsys.readouterr().out
+    assert '2026.10.03 [1/5] 待發布｜本週導讀｜鍵：2026.10.03:intro' in output
+    assert '2026.10.03 [2/5] 已發布｜台灣｜鍵：2026.10.03:taiwan' in output
+    assert '2026.09.26 [1/1] 待發布｜本週導讀｜鍵：2026.09.26:intro' in output
+    assert main(['social', 'threads', 'requeue', '--issue', '2026.10.03', '--index', '2']) == 0
+    after = queue.load()
+    assert after['posts'][1]['status'] == 'pending'
+    assert after['posts'][1]['history'][0]['post_id'] == 'taiwan-post'
+    assert after['posts'][0] == state['posts'][0]
+    assert after['posts'][-1] == state['posts'][-1]
 
 
 def test_delivered_issue_can_backfill_and_never_dry_run_enqueue(issue_directory, social_config, monkeypatch):

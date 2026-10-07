@@ -31,8 +31,8 @@ def social_config(tmp_path, now):
 @pytest.fixture
 def post():
     return Post('2026.10.03:story', '2026.10.03', 'story', '國際',
-                '合成標題\n\n合成一句話。\n\nhttps://telegra.ph/synthetic\n\n#經濟學人導讀',
-                'https://telegra.ph/synthetic')
+                '合成標題\n\n合成一句話。\n\nhttps://telegra.ph/synthetic',
+                'https://telegra.ph/synthetic', topic_tag='經濟學人導讀')
 
 
 @pytest.fixture
