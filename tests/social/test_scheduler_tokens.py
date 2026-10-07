@@ -3,6 +3,7 @@ from datetime import timedelta
 import json
 import os
 import stat
+from urllib.parse import parse_qs
 
 import pytest
 
@@ -34,6 +35,44 @@ def test_scheduler_posts_at_most_one_then_interval_and_idempotency(social_config
     assert len(opener.requests) == 3
     assert '間隔' in gate(now + timedelta(minutes=59), state, social_config.social.threads)
     assert gate(now + timedelta(minutes=60), state, social_config.social.threads) is None
+
+
+def test_requeued_earlier_post_is_next_and_keeps_repeated_history(social_config, queued, now):
+    state = queued.load()
+    first = state['posts'][0]
+    first.update(status='posted', post_id='first-publication', container_id='old-container',
+                 published_at=(now - timedelta(hours=2)).isoformat())
+    state['last_posted_at'] = first['published_at']
+    queued.save(state)
+    assert queued.requeue(first['post']['key'])
+    opener = FakeOpener([Response({'data': [{'quota_usage': 1, 'config': {'quota_total': 250}}]}),
+                         Response({'id': 'new-container'}), Response({'id': 'second-publication'})])
+    scheduler = Scheduler(social_config, clock=lambda: now, client_factory=factory(opener), wait=lambda _: None)
+    assert scheduler.post_next() == 0
+    creation = parse_qs(opener.requests[1].data.decode())
+    assert creation['text'] == [first['post']['text']]
+    assert creation['topic_tag'] == ['經濟學人導讀']
+    after = queued.load()
+    assert after['posts'][0]['post_id'] == 'second-publication'
+    assert after['posts'][0]['container_id'] == 'new-container'
+    assert after['posts'][1]['status'] == 'pending'
+    assert queued.requeue(first['post']['key'])
+    history = queued.load()['posts'][0]['history']
+    assert [item['post_id'] for item in history] == ['first-publication', 'second-publication']
+
+
+def test_requeue_preserves_daily_limit_and_post_interval(social_config, queued, now):
+    state = queued.load()
+    first = state['posts'][0]
+    first.update(status='posted', post_id='old-post', published_at=now.isoformat())
+    state['last_posted_at'] = now.isoformat()
+    queued.save(state)
+    assert queued.requeue(first['post']['key'])
+    state = queued.load()
+    config = replace(social_config.social.threads, max_per_day=1)
+    assert '間隔' in gate(now + timedelta(minutes=59), state, config)
+    assert '上限' in gate(now + timedelta(hours=1), state, config)
+    assert gate(now + timedelta(days=1), state, config) is None
 
 
 @pytest.mark.parametrize(('minutes', 'allowed'), [(-1, False), (0, True), (839, True), (840, True), (841, False)])

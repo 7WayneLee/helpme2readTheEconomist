@@ -40,8 +40,9 @@ def gate(now: datetime, state: dict, config: ThreadsConfig) -> str | None:
     if state.get("last_posted_at") and now < timestamp(state["last_posted_at"]) + timedelta(minutes=config.interval_minutes):
         return "尚未達到發文間隔。"
     local_date = now.astimezone(ZoneInfo(config.timezone)).date()
-    count = sum(1 for item in state["posts"] if item.get("published_at")
-                and timestamp(item["published_at"]).astimezone(ZoneInfo(config.timezone)).date() == local_date)
+    count = sum(1 for item in state["posts"] for publication in [item, *item.get("history", [])]
+                if publication.get("published_at") and timestamp(publication["published_at"]).astimezone(
+                    ZoneInfo(config.timezone)).date() == local_date)
     if count >= config.max_per_day:
         return "今日已達發文上限。"
     return None

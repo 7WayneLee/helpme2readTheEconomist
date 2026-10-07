@@ -6,8 +6,9 @@ import argparse
 from datetime import datetime, timezone
 
 from ..config import Config
+from ..fetch import normalize_issue_date
 from ..social.formatting import Post, character_count
-from ..social.queue import Queue, prepare_posts
+from ..social.queue import Queue, RequeueError, prepare_posts
 from ..social.scheduler import Scheduler
 from ..social.tokens import load_token
 from .render import saved_issue_directory
@@ -21,6 +22,11 @@ def configure(parser: argparse.ArgumentParser) -> None:
     preview.add_argument("--issue", default="latest", metavar="YYYY.MM.DD")
     enqueue = actions.add_parser("enqueue", help="將已發布期號加入佇列")
     enqueue.add_argument("--issue", required=True, metavar="YYYY.MM.DD")
+    requeue = actions.add_parser("requeue", help="將已發布貼文重新排入佇列；請先在 Threads App 刪除舊貼文")
+    requeue.add_argument("--issue", metavar="YYYY.MM.DD", help="使用 --index 時必填")
+    selection = requeue.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--index", type=int, metavar="N", help="本期貼文序號，從 1 開始；介紹為 1")
+    selection.add_argument("--key", help="status 顯示的完整佇列鍵")
     next_post = actions.add_parser("post-next", help="依排程發布至多一則貼文")
     next_post.add_argument("--dry-run", action="store_true", help="離線試跑，不查詢 API 或傳送警示")
     actions.add_parser("status", help="佇列進度與權杖年齡")
@@ -51,6 +57,23 @@ def run(args: argparse.Namespace, config: Config) -> int:
             return 0
         if action == "post-next":
             return Scheduler(config).post_next(dry_run=args.dry_run)
+        if action == "requeue":
+            state = queue.load()
+            issue = normalize_issue_date(args.issue) if args.issue else None
+            candidates = [item for item in state["posts"]
+                          if issue is None or item["post"]["issue_date"] == issue]
+            if args.index is not None:
+                if issue is None or not 1 <= args.index <= len(candidates):
+                    raise RequeueError("請提供 --issue 與本期有效序號（從 1 開始，介紹為 1）；可用 status 查看。")
+                record = candidates[args.index - 1]
+            else:
+                record = next((item for item in candidates if item["post"]["key"] == args.key), None)
+                if record is None:
+                    raise RequeueError("找不到指定的佇列鍵；請先查看 social threads status。")
+            changed = queue.requeue(record["post"]["key"], topic_tag=config.social.threads.topic_tag)
+            print("已重新排入佇列；等待定時器依原序號發布，舊貼文請在 Threads App 刪除。" if changed else
+                  "貼文仍待發布；佇列未變更。")
+            return 0
         if action in ("pause", "resume"):
             with queue.lock():
                 state = queue.load()
@@ -64,6 +87,14 @@ def run(args: argparse.Namespace, config: Config) -> int:
         posted = sum(p["status"] == "posted" for p in state["posts"])
         print(f"Threads：{'啟用' if config.social.threads.enabled else '停用'}；佇列：{'暫停' if state['paused'] else '可執行'}")
         print(f"已發布 {posted}/{len(state['posts'])} 則；待發布 {len(state['posts']) - posted} 則。")
+        labels = {"pending": "待發布", "container": "容器已建立", "publishing": "發布中",
+                  "posted": "已發布", "uncertain": "結果待確認"}
+        issues = dict.fromkeys(item["post"]["issue_date"] for item in state["posts"])
+        for issue in issues:
+            records = [item for item in state["posts"] if item["post"]["issue_date"] == issue]
+            for index, item in enumerate(records, 1):
+                post = item["post"]
+                print(f"{issue} [{index}/{len(records)}] {labels[item['status']]}｜{post['section']}｜鍵：{post['key']}")
         if state.get("pause_reason"):
             labels = {"authorization": "授權失效", "refresh": "權杖更新失敗", "account": "帳號不符", "uncertain": "發布結果待確認"}
             print("暫停原因：" + labels.get(state["pause_reason"], "人工暫停"))
@@ -74,6 +105,9 @@ def run(args: argparse.Namespace, config: Config) -> int:
         print("權杖：尚未設定。" if token is None else
               f"權杖年齡：{token.age_days(now):.1f} 天{'（依 env 檔時間估計）' if token.age_estimated else ''}；到期：{token.expires_at.date()}。")
         return 0
+    except RequeueError as error:
+        print(str(error))
+        return 1
     except Exception as error:
         # Never stringify exceptions from secret-bearing storage/transports.
         print(f"社群操作失敗（{type(error).__name__}）；請檢查本期資料、公開封面與佇列狀態。")

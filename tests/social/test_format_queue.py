@@ -21,14 +21,82 @@ def test_queue_order_cover_and_merged_leader(issue_directory):
     assert '（推論）與台灣的合成關聯。' in posts[1].text
     assert posts[2].link_url == 'https://telegra.ph/focus'
     assert all(character_count(p.text) <= 500 for p in posts)
+    assert all('#' not in p.text and p.text.endswith(p.link_url) for p in posts)
+    assert all(p.topic_tag == '經濟學人導讀' for p in posts)
 
 
 def test_selection_retains_canonical_order(issue_directory):
-    config = ThreadsConfig(sections=('財經・科技・文化', '台灣'), link_target='weekly', hashtags=('#導讀', '#台灣'))
+    config = ThreadsConfig(sections=('財經・科技・文化', '台灣'), link_target='weekly', topic_tag='導讀')
     posts = prepare_posts(issue_directory, config)
     assert [p.article_id for p in posts] == ['intro', 'taiwan', 'topics']
     assert all(p.link_url == 'https://telegra.ph/weekly' for p in posts)
-    assert all(p.text.endswith('#導讀 #台灣') for p in posts)
+    assert all(p.topic_tag == '導讀' and p.text.endswith(p.link_url) for p in posts)
+
+
+def test_topic_uses_no_body_budget(issue_directory):
+    digest = load_json(issue_directory / 'digest.json', Digest)
+    entry = Entry(digest.issue.articles[3], digest.classifications['topics'], digest.summaries['topics'])
+    prefix = entry.classification.title_zh + '\n\n'
+    suffix = '\n\nhttps://telegra.ph/topics'
+    entry.summary.headline_zh = '字' * (500 - character_count(prefix + suffix))
+    post = article_post(digest, entry, '財經・科技・文化', 'https://telegra.ph/topics',
+                        ThreadsConfig(topic_tag='題' * 50))
+    assert character_count(post.text) == 500
+    assert post.topic_tag == '題' * 50
+
+
+def test_requeue_preserves_history_and_original_order(social_config, queued, now):
+    state = queued.load()
+    first = state['posts'][0]
+    first.update(status='posted', post_id='old-post', container_id='old-container',
+                 created_at=now.isoformat(), published_at=now.isoformat(), publish_started_at=now.isoformat())
+    state['last_posted_at'] = now.isoformat()
+    queued.save(state)
+    assert queued.requeue(first['post']['key'])
+    after = queued.load()
+    current = after['posts'][0]
+    assert current['status'] == 'pending'
+    assert current['history'][0]['post_id'] == 'old-post'
+    assert current['history'][0]['published_at'] == now.isoformat()
+    assert current['history'][0]['container_id'] == 'old-container'
+    assert current['history'][0]['post'] == first['post']
+    assert all(current[name] is None for name in ('post_id', 'container_id', 'created_at', 'published_at'))
+    assert 'publish_started_at' not in current
+    assert Queue.next(after) is current
+    assert after['last_posted_at'] == now.isoformat()
+    assert after['posts'][1] == state['posts'][1]
+
+
+def test_requeue_pending_is_noop(queued):
+    before = queued.path.read_bytes()
+    assert not queued.requeue(queued.load()['posts'][0]['post']['key'])
+    assert queued.path.read_bytes() == before
+
+
+@pytest.mark.parametrize('status', ['container', 'publishing', 'uncertain'])
+def test_requeue_in_progress_cannot_discard_publication(queued, now, status):
+    from econ_digest.social.queue import RequeueError
+    state = queued.load()
+    state['posts'][0].update(status=status, container_id='existing-container', publish_started_at=now.isoformat())
+    queued.save(state)
+    before = queued.path.read_bytes()
+    with pytest.raises(RequeueError):
+        queued.requeue(state['posts'][0]['post']['key'])
+    assert queued.path.read_bytes() == before
+
+
+def test_legacy_pending_hashtag_migrates_without_changing_inflight_text(queued, now):
+    state = queued.load()
+    for item in state['posts']:
+        item['post'].pop('topic_tag')
+        item['post']['text'] += '\n\n#舊導讀 #台灣'
+    state['posts'][1].update(status='publishing', container_id='existing-container',
+                              publish_started_at=now.isoformat())
+    queued.save(state)
+    migrated = queued.load()['posts']
+    assert migrated[0]['post']['text'].endswith('https://telegra.ph/synthetic')
+    assert migrated[0]['post']['topic_tag'] == '舊導讀'
+    assert migrated[1]['post'] == state['posts'][1]['post']
 
 
 def test_idempotent_enqueue_preserves_container_and_post_ids(issue_directory, social_config):

@@ -841,3 +841,13 @@ output/                         # 網站發布與封存目錄（gitignored，備
 ```
 
 預覽與試跑完全離線。檢閱後在 `config.toml` 的 `[social.threads]` 設 `enabled = true`，再執行 `deploy/install-threads-timer.sh`。預設台北時間 08:00–22:00、每 60 分鐘至多一則、每天最多 15 則；API 額度另查詢官方端點。刷新權杖與佇列均保存在忽略的 `data/social/`。`social threads pause` / `resume` 可暫停及恢復，停用定時器使用 `systemctl --user disable --now econ-digest-threads.timer`；授權或刷新失敗會暫停並只嘗試一次私人 Telegram 警示。
+
+每則貼文只有一個主題，透過建立容器的 `topic_tag` API 參數設定，內文不附加 # 標籤。`[social.threads] topic_tag` 預設為「經濟學人導讀」，須為 1–50 字元且不含 `.` 或 `&`；設為 `""` 不送主題。舊設定只有 `hashtags` 時，取第一個並移除開頭的 `#`。參見 [Threads 官方發布文件](https://developers.facebook.com/documentation/threads/posts/)。
+
+### 修正已發布貼文
+
+1. 在 Threads App 刪除要修正的舊貼文。
+2. 執行 `.venv/bin/econ-digest social threads requeue --issue 2026.10.03 --index 1`，按 `preview`／`status` 的本期序號選取；介紹是第 1 則，也可使用 `requeue --key` 搭配 `status` 顯示的完整佇列鍵。
+3. 等待定時器依原順序與發文時段重新發布。
+
+`requeue` 完全離線，保留佇列原文字、移除舊版 # 標籤尾行，並套用目前的主題設定；舊貼文 ID 與發布時間留在歷史。它不會刪除 Threads 上的貼文，也不需要重新讀取期號資料；仍待發布的項目不變更。

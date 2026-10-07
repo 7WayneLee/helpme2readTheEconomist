@@ -42,6 +42,7 @@ class Post:
     text: str
     link_url: str
     image_url: str | None = None
+    topic_tag: str = ""
 
 
 def _protected(text: str) -> bool:
@@ -62,10 +63,10 @@ def _shorter(text: str) -> str | None:
 
 
 def _fit(heading: str, headline: str, points: list[str], context: list[str],
-         link_url: str, hashtags: tuple[str, ...]) -> str:
+         link_url: str) -> str:
     def compose() -> str:
         body = [headline, *["・" + point for point in points], *context]
-        return "\n\n".join([heading, "\n".join(body), link_url, " ".join(hashtags)])
+        return "\n\n".join([heading, "\n".join(body), link_url])
 
     while character_count(compose()) > LIMIT:
         # Drop whole optional points before shortening any prose.
@@ -74,7 +75,7 @@ def _fit(heading: str, headline: str, points: list[str], context: list[str],
         if removable is not None:
             points.pop(removable)
             continue
-        # Preserve the site title, tags, links and inference qualifications.
+        # Preserve the site title, links and inference qualifications.
         shorter = _shorter(headline)
         if shorter is not None:
             headline = shorter
@@ -110,14 +111,15 @@ def article_post(digest: Digest, entry: Entry, section: str, link_url: str,
     if entry.classification.taiwan_link:
         context.append("與台灣的關聯：" + clean_text(entry.classification.taiwan_link))
     text = _fit(heading, clean_text(summary.headline_zh), [clean_text(p) for p in points],
-                context, link_url, config.hashtags)
+                context, link_url)
     return Post(f"{digest.issue_date}:{entry.article.id}", digest.issue_date,
-                entry.article.id, section, text, link_url)
+                entry.article.id, section, text, link_url, topic_tag=config.topic_tag)
 
 
 def intro_post(digest: Digest, link_url: str, image_url: str | None,
                config: ThreadsConfig) -> Post:
-    text = "\n".join([title(digest), overview(digest), "", link_url, "", " ".join(config.hashtags)])
+    text = "\n".join([title(digest), overview(digest), "", link_url])
     if character_count(text) > LIMIT:
         raise FormatError("本期介紹超過 Threads 500 字元。")
-    return Post(f"{digest.issue_date}:intro", digest.issue_date, "intro", "本週導讀", text, link_url, image_url)
+    return Post(f"{digest.issue_date}:intro", digest.issue_date, "intro", "本週導讀", text,
+                link_url, image_url, config.topic_tag)

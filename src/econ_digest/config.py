@@ -172,7 +172,7 @@ class ThreadsConfig:
     interval_minutes: int = 60
     max_per_day: int = 15
     link_target: str = "section"
-    hashtags: tuple[str, ...] = ("#經濟學人導讀",)
+    topic_tag: str = "經濟學人導讀"
 
 
 @dataclass(frozen=True)
@@ -225,7 +225,7 @@ def _convert(value: Any, annotation: Any, key: str, base_dir: Path) -> Any:
         path = Path(value).expanduser()
         return (base_dir / path).resolve()
     if annotation is str:
-        if not isinstance(value, str) or (not value.strip() and key not in {"telegraph.author_url", "site.base_url", "site.ssh_host", "site.remote_dir", "backup.remote", "backup.author_name", "backup.author_email"}):
+        if not isinstance(value, str) or (not value.strip() and key not in {"telegraph.author_url", "site.base_url", "site.ssh_host", "site.remote_dir", "backup.remote", "backup.author_name", "backup.author_email", "social.threads.topic_tag"}):
             _fail(key, "必須是非空字串")
         return value
     if annotation is bool:
@@ -257,6 +257,14 @@ def _convert(value: Any, annotation: Any, key: str, base_dir: Path) -> Any:
 
 
 def _build(cls: type[T], data: dict[str, Any], prefix: str, base_dir: Path) -> T:
+    if cls is ThreadsConfig and "hashtags" in data:
+        data = dict(data)
+        legacy = data.pop("hashtags")
+        if "topic_tag" not in data:
+            tags = _convert(legacy, tuple[str, ...], "social.threads.hashtags", base_dir)
+            data["topic_tag"] = tags[0].removeprefix("#")
+            if not data["topic_tag"]:
+                _fail("social.threads.topic_tag", "舊標籤去除 # 後必須是非空主題")
     if cls is ResearchConfig and "cna_request_budget" in data:
         logger.warning("research.cna_request_budget 已棄用，請改用 research.request_budget")
         data = dict(data)
@@ -320,10 +328,9 @@ def _validate(config: Config) -> None:
         _fail("social.threads.sections", "必須是台灣、本週焦點、國際或財經・科技・文化")
     if threads.link_target not in ("section", "weekly"):
         _fail("social.threads.link_target", "必須是 section 或 weekly")
-    if not 1 <= len(threads.hashtags) <= 2 or any(
-        not re.fullmatch(r"#[\w]+", tag) for tag in threads.hashtags
-    ):
-        _fail("social.threads.hashtags", "必須是 1 至 2 個以 # 開頭的標籤")
+    if threads.topic_tag and (not threads.topic_tag.strip() or len(threads.topic_tag) > 50
+                              or "." in threads.topic_tag or "&" in threads.topic_tag):
+        _fail("social.threads.topic_tag", "主題須為 1 至 50 字元且不含 . 或 &；空字串表示不送主題")
     if config.analysis.focus_count <= 0:
         _fail("analysis.focus_count", "必須大於零")
     if config.research.request_budget < 0:
